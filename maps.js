@@ -62,6 +62,34 @@ export function getCurrentPosition() {
   });
 }
 
+// Follow the device position during navigation. Returns a watch id; the
+// callback gets {lat,lng,accuracy} on each fix. Plain-language errors.
+export function watchPosition(onPos, onErr) {
+  if (!navigator.geolocation) { onErr && onErr(new Error("This device can't share its location.")); return null; }
+  return navigator.geolocation.watchPosition(
+    (p) => onPos({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+    (err) => onErr && onErr(err),
+    { enableHighAccuracy: true, maximumAge: 1500, timeout: 15000 }
+  );
+}
+export function clearWatch(id) {
+  try { if (id != null && navigator.geolocation) navigator.geolocation.clearWatch(id); } catch (_) {}
+}
+
+// Move (or create) the "you are here" dot as the user walks.
+let youMarker = null;
+export function setYou(L, mapObj, lat, lng, follow = true) {
+  if (!mapObj) return;
+  if (!youMarker) {
+    youMarker = L.circleMarker([lat, lng], {
+      radius: 9, color: "#04201f", weight: 3, fillColor: "#2ee6e6", fillOpacity: 1,
+    }).addTo(mapObj).bindPopup("You are here");
+  } else {
+    youMarker.setLatLng([lat, lng]);
+  }
+  if (follow) { try { mapObj.panTo([lat, lng]); } catch (_) {} }
+}
+
 // Create the map once (or recenter). `el` must be visible so tiles size right.
 export function getMap(L, el, center) {
   if (!map) {

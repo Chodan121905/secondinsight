@@ -68,11 +68,11 @@ export async function exaViaServer({ labelText, signal }) {
   } catch (_) { return null; }
 }
 
-export async function routeViaServer({ origin, query, signal }) {
+export async function routeViaServer({ origin, query, destCoords, destName, signal }) {
   const r = await fetch(`${BASE}/route`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ origin, query }),
+    body: JSON.stringify({ origin, query, destCoords, destName }),
     signal,
   });
   const j = await r.json().catch(() => ({}));

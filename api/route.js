@@ -15,38 +15,44 @@ module.exports = async (req, res) => {
   const key = (process.env.ORS_API_KEY || "").trim().replace(/^["']|["']$/g, "");
   if (!key) return res.status(500).json({ error: "The server has no maps key configured." });
 
-  const { origin, query } = readBody(req);
+  const { origin, query, destCoords, destName } = readBody(req);
   if (!origin || typeof origin.lat !== "number" || typeof origin.lng !== "number")
     return res.status(400).json({ error: "Missing your location." });
-  if (!query) return res.status(400).json({ error: "Missing a destination." });
+  if (!query && !destCoords) return res.status(400).json({ error: "Missing a destination." });
 
   try {
-    // 1) Geocode the destination with OpenStreetMap Nominatim — free, no key,
-    //    and reliable (ORS's hosted geocoding rejects many keys with 403). We
-    //    bias results to a box around the user so "orchard" prefers the one
-    //    near them. Nominatim requires a descriptive User-Agent.
-    const d = 0.7; // ~bias box (degrees) around the user
-    const viewbox = `${origin.lng - d},${origin.lat + d},${origin.lng + d},${origin.lat - d}`;
-    const gUrl =
-      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=0` +
-      `&q=${encodeURIComponent(query)}` +
-      `&viewbox=${encodeURIComponent(viewbox)}&bounded=0`;
-    const gRes = await fetch(gUrl, {
-      headers: {
-        "User-Agent": "SecondSight/1.0 (assistive navigation for low-vision users)",
-        "Accept-Language": "en",
-      },
-    });
-    if (!gRes.ok) return res.status(502).json({ error: "Place search failed. Try again in a moment." });
-    const gData = await gRes.json();
-    const place = Array.isArray(gData) && gData[0];
-    if (!place) return res.status(404).json({ error: "I couldn't find that place. Try saying it differently." });
-    const dest = {
-      name: (place.name || (place.display_name || query).split(",")[0]).trim(),
-      label: place.display_name || "",
-      lon: parseFloat(place.lon),
-      lat: parseFloat(place.lat),
-    };
+    let dest;
+    if (destCoords && typeof destCoords.lat === "number" && typeof destCoords.lon === "number") {
+      // Re-routing: we already know where we're going, so skip geocoding.
+      dest = { name: destName || "your destination", label: "", lat: destCoords.lat, lon: destCoords.lon };
+    } else {
+      // 1) Geocode the destination with OpenStreetMap Nominatim — free, no key,
+      //    and reliable (ORS's hosted geocoding rejects many keys with 403). We
+      //    bias results to a box around the user so "orchard" prefers the one
+      //    near them. Nominatim requires a descriptive User-Agent.
+      const d = 0.7; // ~bias box (degrees) around the user
+      const viewbox = `${origin.lng - d},${origin.lat + d},${origin.lng + d},${origin.lat - d}`;
+      const gUrl =
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=0` +
+        `&q=${encodeURIComponent(query)}` +
+        `&viewbox=${encodeURIComponent(viewbox)}&bounded=0`;
+      const gRes = await fetch(gUrl, {
+        headers: {
+          "User-Agent": "SecondSight/1.0 (assistive navigation for low-vision users)",
+          "Accept-Language": "en",
+        },
+      });
+      if (!gRes.ok) return res.status(502).json({ error: "Place search failed. Try again in a moment." });
+      const gData = await gRes.json();
+      const place = Array.isArray(gData) && gData[0];
+      if (!place) return res.status(404).json({ error: "I couldn't find that place. Try saying it differently." });
+      dest = {
+        name: (place.name || (place.display_name || query).split(",")[0]).trim(),
+        label: place.display_name || "",
+        lon: parseFloat(place.lon),
+        lat: parseFloat(place.lat),
+      };
+    }
 
     // 2) Walking route.
     const dRes = await fetch(`${ORS}/v2/directions/foot-walking/geojson`, {
@@ -65,13 +71,25 @@ module.exports = async (req, res) => {
     const feat = dData.features && dData.features[0];
     if (!feat) return res.status(404).json({ error: "I couldn't find a walking route to that place." });
     const seg = feat.properties.segments[0];
+    const line = feat.geometry.coordinates; // [lng,lat] pairs along the route
 
     res.status(200).json({
       destinationName: dest.name,
       address: dest.label,
       distanceText: fmtDist(seg.distance),
       durationText: fmtDur(seg.duration),
-      steps: seg.steps.map((s) => ({ text: s.instruction, distance: s.distance ? fmtDist(s.distance) : "" })),
+      // Each step carries its maneuver location + raw metres so the client can
+      // auto-advance turns by GPS (Google-Maps style).
+      steps: seg.steps.map((s) => {
+        const wp = (s.way_points && s.way_points[0]) || 0;
+        const c = line[wp] || line[0];
+        return {
+          text: s.instruction,
+          distance: s.distance ? fmtDist(s.distance) : "",
+          distanceM: s.distance || 0,
+          loc: c ? { lat: c[1], lng: c[0] } : null,
+        };
+      }),
       coords: feat.geometry.coordinates.map((c) => [c[1], c[0]]),
       dest: { lat: dest.lat, lon: dest.lon },
     });

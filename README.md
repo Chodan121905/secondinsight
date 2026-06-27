@@ -140,11 +140,16 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
    about nearby objects on-device. The on-screen buttons (**Read text**,
    **Medicine label**, **Translate sign**, **Ask a question**) are optional
    shortcuts for a sighted helper or anyone who prefers tapping.
-5. **🧭 Navigate somewhere:** say *"navigate to …"* or type a destination
-   ("nearest pharmacy",
-   an address, a place name). The app finds your location and speaks the best
-   **walking route**, then lets you step through each instruction (Next / Back
-   / Repeat) as you walk. A map renders for sighted helpers.
+5. **🧭 Navigate somewhere (live turn-by-turn):** say *"navigate to …"* or type
+   a destination ("nearest pharmacy", an address, a place name). The app finds
+   your location and speaks the best **walking route**, then — Google-Maps style
+   — **follows your GPS and announces each turn as you reach it** ("In 20 metres,
+   turn left"), **re-routes automatically** if you drift off course, and says
+   *"You've arrived"* at the end. **Object + hazard detection keeps running in
+   parallel** the whole time, so you're still warned about anything close while
+   being guided. You can still override by voice (*"next"*, *"back"*, *"repeat"*,
+   *"done"*). A live map with a moving "you are here" dot renders for sighted
+   helpers.
 
    Navigation uses **free, no-billing** services: **OpenStreetMap** tiles via
    Leaflet (no key) for the map, **Nominatim** (OpenStreetMap, no key) to find

@@ -14,7 +14,8 @@ import { startCamera, captureFrame, bindVisibility, isSecure,
 import { TASKS, taskTitle } from "./vision.js";
 import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
          earcon, ensureAudio, setSpeechRate, isSpeaking, onSpeakStart } from "./speech.js";
-import { loadMap, getCurrentPosition, getMap, renderRoute } from "./maps.js";
+import { loadMap, getCurrentPosition, getMap, renderRoute,
+         watchPosition, clearWatch, setYou } from "./maps.js";
 import { enableExploreByTouch } from "./explore.js";
 import { loadDetector, detectFrame, describeDetections, phraseFor, drawBoxes } from "./detect.js";
 import { initBackend, backendHas, backendUp, visionViaServer, exaViaServer,
@@ -298,6 +299,17 @@ let routeSteps = [];
 let stepIdx = 0;
 let destName = "";
 
+// Live turn-by-turn (Google-Maps style): follow GPS, auto-announce turns,
+// re-route on drift. Detection keeps running in parallel during navigation.
+let routeLine = [];          // [[lat,lng],…] current route polyline
+let destCoord = null;        // {lat, lon} of the destination
+let navigating = false;
+let navWatchId = null;
+let preAnnouncedStep = -1;   // last step we gave the "in X metres" heads-up for
+let offRouteSince = 0;       // when we first drifted off-route (0 = on route)
+let rerouting = false;
+let navL = null, navMap = null; // Leaflet handle + map for live marker/re-render
+
 function openNavigate() {
   if (!backendHas("maps")) { featureUnavailable("maps"); return; }
   navHeard.textContent = "";
@@ -336,8 +348,10 @@ async function navigateTo(dest) {
     setRouteThinking("Finding the best walking route…");
     const mapObj = getMap(L, mapEl, origin);
     mapEl.hidden = false;
+    navL = L; navMap = mapObj;
     const route = await routeViaServer({ origin, query: dest });
     renderRoute(L, mapObj, route.coords, origin, route.dest);
+    setYou(L, mapObj, origin.lat, origin.lng, false);
     showRoute(route);
   } catch (err) {
     showRouteError(err.message || "Couldn't get directions. Try again.");
@@ -353,11 +367,13 @@ function showRoute(route) {
   routeThinking.hidden = true;
   routeSteps = route.steps && route.steps.length ? route.steps : [];
   destName = route.destinationName || "your destination";
+  destCoord = route.dest || null;
+  routeLine = route.coords || [];
   stepIdx = 0;
 
   const summary =
     `Walking route to ${destName}. About ${route.distanceText}, ${route.durationText}. ` +
-    `${routeSteps.length} step${routeSteps.length === 1 ? "" : "s"}.`;
+    `Follow along — I'll tell you each turn as you reach it.`;
   routeSummary.hidden = false;
   routeSummary.textContent = summary;
 
@@ -368,8 +384,134 @@ function showRoute(route) {
     return;
   }
   speak(summary);
-  showStep(0, false); // queue first step after the summary
+  showStep(0, false);   // announce the first instruction after the summary
+  startNavWatch();      // begin GPS-driven turn-by-turn
 }
+
+// ---- Live turn-by-turn (GPS) --------------------------------------------
+function startNavWatch() {
+  navigating = true;
+  offRouteSince = 0;
+  preAnnouncedStep = -1;
+  rerouting = false;
+  if (navWatchId == null) navWatchId = watchPosition(onNavPosition, () => {});
+}
+function endNavigation() {
+  navigating = false;
+  if (navWatchId != null) { clearWatch(navWatchId); navWatchId = null; }
+}
+
+function onNavPosition(pos) {
+  if (!navigating) return;
+  if (navL && navMap) setYou(navL, navMap, pos.lat, pos.lng);
+
+  // Arrived at the destination?
+  if (destCoord && haversine(pos, { lat: destCoord.lat, lng: destCoord.lon }) <= 20)
+    return arriveNavigation();
+
+  // Drifted off the route? Re-route after a few seconds of being away.
+  if (!rerouting && routeLine.length > 1) {
+    const off = distToPolyline(pos, routeLine);
+    if (off > 35) {
+      if (!offRouteSince) offRouteSince = Date.now();
+      else if (Date.now() - offRouteSince > 6000) return reroute(pos);
+    } else {
+      offRouteSince = 0;
+    }
+  }
+
+  advanceSteps(pos); // announce the upcoming turn as it gets close
+}
+
+function advanceSteps(pos) {
+  const s = routeSteps[stepIdx];
+  if (!s || !s.loc) return;
+  const dist = haversine(pos, { lat: s.loc.lat, lng: s.loc.lng });
+
+  if (dist <= 14) {
+    // At the maneuver — say it firmly, then target the next one.
+    announceManeuver(stepIdx, true);
+    if (stepIdx < routeSteps.length - 1) { stepIdx++; preAnnouncedStep = -1; }
+  } else if (dist <= 35 && preAnnouncedStep !== stepIdx) {
+    preAnnouncedStep = stepIdx;
+    announceManeuver(stepIdx, false, Math.round(dist));
+  }
+}
+
+function announceManeuver(i, now, metres) {
+  const s = routeSteps[i];
+  if (!s) return;
+  routeStep.textContent = `Step ${i + 1} of ${routeSteps.length}. ${s.text}`;
+  routePrev.disabled = i === 0;
+  const phrase = now ? s.text : `In ${metres} metres, ${lowerFirst(s.text)}`;
+  vibrate(now ? [60, 40, 60] : 25);
+  if (now) earcon("capture");
+  speak(phrase, { interrupt: now }); // the actual turn interrupts; heads-up waits for a gap
+}
+
+function arriveNavigation() {
+  endNavigation();
+  const msg = `You've arrived at ${destName}.`;
+  routeStep.textContent = msg;
+  routeNext.disabled = true;
+  vibrate([40, 40, 40]);
+  earcon("arrive");
+  speak(msg, { interrupt: true });
+}
+
+async function reroute(pos) {
+  if (rerouting || !destCoord) return;
+  rerouting = true;
+  offRouteSince = 0;
+  earcon("listen");
+  speak("You're off the route. Recalculating.", { interrupt: true });
+  try {
+    const route = await routeViaServer({
+      origin: pos,
+      destCoords: { lat: destCoord.lat, lon: destCoord.lon },
+      destName,
+    });
+    routeSteps = route.steps || [];
+    routeLine = route.coords || [];
+    stepIdx = 0; preAnnouncedStep = -1;
+    if (navL && navMap) { renderRoute(navL, navMap, route.coords, pos, route.dest); setYou(navL, navMap, pos.lat, pos.lng); }
+    if (routeSteps[0]) {
+      routeStep.textContent = `Step 1 of ${routeSteps.length}. ${routeSteps[0].text}`;
+      speak(routeSteps[0].text, { interrupt: false });
+    }
+  } catch (_) {
+    speak("I couldn't recalculate. Try heading back to the path.", { interrupt: false });
+  } finally {
+    rerouting = false;
+  }
+}
+
+// ---- Geometry helpers (metres) ------------------------------------------
+function haversine(a, b) {
+  const R = 6371000, toR = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * toR, dLng = (b.lng - a.lng) * toR;
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+function distToPolyline(p, line) {
+  let min = Infinity;
+  for (let i = 0; i < line.length - 1; i++) {
+    const d = distToSeg(p, { lat: line[i][0], lng: line[i][1] }, { lat: line[i + 1][0], lng: line[i + 1][1] });
+    if (d < min) min = d;
+  }
+  return min;
+}
+function distToSeg(p, a, b) {
+  const toR = Math.PI / 180, R = 6371000, lat0 = p.lat * toR;
+  const proj = (pt) => ({ x: (pt.lng - p.lng) * toR * Math.cos(lat0) * R, y: (pt.lat - p.lat) * toR * R });
+  const A = proj(a), B = proj(b);
+  const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy;
+  let t = len2 ? ((-A.x) * dx + (-A.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(A.x + t * dx, A.y + t * dy);
+}
+function lowerFirst(s) { return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
 
 function showStep(i, interrupt = true) {
   stepIdx = Math.max(0, Math.min(i, routeSteps.length - 1));
@@ -494,13 +636,25 @@ async function detectLoop() {
     const dets = await detectFrame(detector, video);
     lastDets = dets;
     drawBoxes(overlayCanvas, video, dets, 0.5);
-    if (!narrationPaused && !anyModalOpen()) {
+    if (awarenessAllowed()) {
       const items = describeDetections(dets, video.videoWidth, video.videoHeight, 0.5);
-      handleHazards(items);              // imminent danger → interrupt now
+      handleHazards(items);              // imminent danger → interrupt now (also during nav)
       maybeAnnounceSurroundings(items);  // otherwise, volunteer what's around
     }
   } catch (_) { /* skip a bad frame */ }
   if (autoOn) detectTimer = setTimeout(detectLoop, 650);
+}
+
+// Detection (hazards + surroundings) should pause for dialogs that take over —
+// but NOT for the route sheet while navigating: we want awareness running in
+// parallel with turn-by-turn, which is the whole point of walking safely.
+function awarenessAllowed() {
+  if (narrationPaused) return false;
+  const blocking = [askOverlay, navOverlay, settingsOverlay, enhancePanel, resultOverlay]
+    .some((o) => !o.hidden);
+  if (blocking) return false;
+  if (!routeOverlay.hidden && !navigating) return false;
+  return true;
 }
 
 function handleHazards(items) {
@@ -526,6 +680,7 @@ function handleHazards(items) {
 // at a calm pace, skipping a repeat when the scene hasn't changed.
 function maybeAnnounceSurroundings(items) {
   if (!items.length || isSpeaking()) return;
+  if (navigating) return;                       // during turn-by-turn, only hazards + turns speak
   const now = Date.now();
   if (now - lastUrgentAt < 1500) return;       // let a warning breathe
   if (now - lastRoundupAt < 6500) return;      // unhurried cadence
@@ -907,7 +1062,7 @@ navCancel.addEventListener("click", () => { navVoice.stop(); closeOverlay(navOve
 routeNext.addEventListener("click", nextStep);
 routePrev.addEventListener("click", () => showStep(stepIdx - 1));
 routeRepeat.addEventListener("click", () => routeSteps.length && showStep(stepIdx));
-routeClose.addEventListener("click", () => { stopSpeaking(); closeOverlay(routeOverlay); });
+routeClose.addEventListener("click", () => { endNavigation(); stopSpeaking(); closeOverlay(routeOverlay); });
 
 // The app narrates on its own, but tapping the camera forces an immediate
 // "Look" — handy if the user wants an answer right now without waiting.
@@ -934,7 +1089,7 @@ enhancePanel.addEventListener("click", (e) => {
   ov.addEventListener("click", (e) => {
     if (e.target !== ov) return;
     if (ov === resultOverlay) { currentAbort?.abort(); stopSpeaking(); }
-    if (ov === routeOverlay) stopSpeaking();
+    if (ov === routeOverlay) { endNavigation(); stopSpeaking(); }
     if (ov === askOverlay) askVoice.stop();
     if (ov === navOverlay) navVoice.stop();
     closeOverlay(ov);
@@ -947,7 +1102,7 @@ document.addEventListener("keydown", (e) => {
   [resultOverlay, askOverlay, navOverlay, routeOverlay, settingsOverlay, enhancePanel].forEach((ov) => {
     if (!ov.hidden) {
       if (ov === resultOverlay) { currentAbort?.abort(); stopSpeaking(); }
-      if (ov === routeOverlay) stopSpeaking();
+      if (ov === routeOverlay) { endNavigation(); stopSpeaking(); }
       closeOverlay(ov);
     }
   });
