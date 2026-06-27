@@ -61,6 +61,9 @@
       </span>
     </button>
 
+    <!-- Detection boxes for "Around me" (visual aid; spoken calls are primary). -->
+    <canvas id="overlay" class="overlay-canvas" aria-hidden="true" hidden></canvas>
+
     <!-- The camera is the biggest thing on screen, so it IS the primary
          action: tapping it runs Describe (the most common need). Hidden until
          the camera starts; sits below the status caption. -->
@@ -79,12 +82,15 @@
       <span class="action__text">Describe what I see</span>
     </button>
 
-    <button class="action action--nav" type="button" data-open="navigate">
-      <span class="action__icon" aria-hidden="true">🧭</span>
-      <span class="action__text">Navigate somewhere</span>
-    </button>
-
     <div class="action-grid">
+      <button id="aroundBtn" class="action action--nav" type="button" data-open="around" aria-pressed="false">
+        <span class="action__icon" aria-hidden="true">👣</span>
+        <span class="action__text">Around me</span>
+      </button>
+      <button class="action action--nav" type="button" data-open="navigate">
+        <span class="action__icon" aria-hidden="true">🧭</span>
+        <span class="action__text">Navigate</span>
+      </button>
       <button class="action" type="button" data-task="read">
         <span class="action__icon" aria-hidden="true">🔤</span>
         <span class="action__text">Read text</span>

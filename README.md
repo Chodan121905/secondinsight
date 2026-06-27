@@ -70,6 +70,20 @@ access (except on `localhost`).
    <https://openrouteservice.org/dev/#/signup>, paste it into **Settings**, and
    allow location permission.
 
+6. **👣 Around me (walking awareness):** a hands-free, real-time loop that calls
+   out nearby people, vehicles, and objects with rough position and proximity —
+   "Person ahead, close", "Car on your left", "Bicycle on your right" — with an
+   urgent tone + haptic when a hazard is very close. Toggle it on and walk;
+   toggle off to stop. Live detection boxes render for sighted helpers.
+
+   Runs on-device with **coco-ssd (MobileNet-SSD)** via TensorFlow.js — a
+   **YOLO-style** object detector that needs **no API key, no cost**, and keeps
+   working **offline** once loaded. It detects the 80 COCO classes (people,
+   bicycles, cars, buses, trucks, motorcycles, dogs, traffic lights, stop
+   signs, benches…) — common objects and people, *not* curbs/poles/stairs.
+   `detect.js` is the only module tied to the model, so a real YOLOv8 ONNX model
+   can be dropped in later without touching the walking UX.
+
 > **Camera is a prototype input.** `camera.js` is the only module bound to the
 > video source, so the phone camera can later be swapped for an IoT / remote
 > camera (stream into the same `<video>`) without touching the AI, speech,

@@ -128,6 +128,14 @@ body {
 .start-gate__hint { margin: 0; color: var(--ink-dim); font-size: 1.1rem; max-width: 24rem; }
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.8 } }
 
+/* ---- Detection box overlay (Around me) -------------------------------- */
+.overlay-canvas {
+  position: absolute; inset: 0 0.75rem 0.5rem; z-index: 1;
+  width: auto; height: auto; pointer-events: none;
+  border-radius: var(--radius);
+}
+.overlay-canvas[hidden] { display: none; }
+
 /* ---- Tap-the-camera-to-describe target -------------------------------- */
 .tap-capture {
   position: absolute; inset: 0 0.75rem 0.5rem; z-index: 1;
@@ -176,8 +184,10 @@ body {
 }
 .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 .action:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
-/* Navigate: flagship, full-width, cyan-edged to read as distinct from Describe. */
-.action--nav { min-height: 4.75rem; font-size: 1.25rem; border-color: var(--cyan); background: var(--surface); }
+/* Flagship secondary actions (Around me, Navigate): cyan-edged, distinct from Describe. */
+.action--nav { border-color: var(--cyan); background: var(--surface); }
+/* "Around me" while running: cyan fill = active/listening, matching its earcons. */
+.action[aria-pressed="true"] { background: var(--cyan); color: var(--cyan-ink); border-color: var(--cyan); }
 
 /* ---- Map (visual aid; spoken steps are primary) ----------------------- */
 .map {

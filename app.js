@@ -17,6 +17,7 @@ import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
 import { loadMap, getCurrentPosition, getMap,
          planWalkingRoute, renderRoute } from "./maps.js";
 import { enableExploreByTouch } from "./explore.js";
+import { loadDetector, detectFrame, describeDetections, phraseFor, drawBoxes } from "./detect.js";
 
 // ---- In-memory session keys (never persisted) ---------------------------
 const keys = { openai: "", exa: "", ors: "" };
@@ -26,8 +27,10 @@ const $ = (id) => document.getElementById(id);
 const video      = $("camera");
 const startBtn   = $("startBtn");
 const tapCapture = $("tapCapture");
+const overlayCanvas = $("overlay");
 const statusEl   = $("status");
 const actions    = $("actions");
+const aroundBtn  = $("aroundBtn");
 
 const resultOverlay = $("resultOverlay");
 const resultTitle   = $("resultTitle");
@@ -193,6 +196,7 @@ function reportCameraError(err) {
 
 // ---- The capture → model → speak loop -----------------------------------
 async function runTask(task, question) {
+  if (aroundOn) stopAround();
   if (!keys.openai) { needKey("openai"); return; }
   const cfg = TASKS[task] || TASKS.describe;
 
@@ -270,6 +274,7 @@ async function enrich(labelText) {
 // ---- Ask dialog ----------------------------------------------------------
 const askVoice = makeVoiceControl({ btn: micBtn, label: micLabel, heard: askHeard, input: askInput });
 function openAsk() {
+  if (aroundOn) stopAround();
   askHeard.textContent = "";
   askInput.value = "";
   openOverlay(askOverlay, voiceInputSupported ? micBtn : askInput);
@@ -292,6 +297,7 @@ let stepIdx = 0;
 let destName = "";
 
 function openNavigate() {
+  if (aroundOn) stopAround();
   if (!keys.ors) { needKey("ors"); return; }
   navHeard.textContent = "";
   navInput.value = "";
@@ -392,9 +398,90 @@ function showRouteError(message) {
   speak(message);
 }
 
+// ---- Around me (real-time object awareness while walking) ----------------
+// Continuous on-device detection loop that calls out nearby people/vehicles/
+// objects with rough position and proximity. Hands-free; toggled on/off.
+let aroundOn = false;
+let aroundModel = null;
+let aroundTimer = null;
+let lastUrgent = 0;
+const lastAnnounce = new Map();
+
+async function toggleAround() {
+  if (aroundOn) return stopAround();
+  setStatus("Loading object detection…", "active");
+  speak("Loading object detection.");
+  try {
+    aroundModel = await loadDetector();
+  } catch (err) {
+    return setStatus(err.message || "Couldn't start object detection.", "error");
+  }
+  aroundOn = true;
+  aroundBtn.setAttribute("aria-pressed", "true");
+  overlayCanvas.hidden = false;
+  lastAnnounce.clear();
+  lastUrgent = 0;
+  earcon("listen");
+  vibrate(40);
+  setStatus("Around me is on. I'll call out what's nearby. Choose Around me again to stop.", "active");
+  speak("Around me is on. I'll tell you what's nearby.");
+  tickAround();
+}
+
+async function tickAround() {
+  if (!aroundOn) return;
+  try {
+    const dets = await detectFrame(aroundModel, video);
+    drawBoxes(overlayCanvas, video, dets, 0.5);
+    announceAround(describeDetections(dets, video.videoWidth, video.videoHeight, 0.5));
+  } catch (_) { /* skip a bad frame */ }
+  if (aroundOn) aroundTimer = setTimeout(tickAround, 550);
+}
+
+function announceAround(items) {
+  if (!items.length) return; // silence = nothing notable nearby
+  const now = Date.now();
+  const top = items[0];
+
+  // Urgent hazard very close: interrupt with haptic + alert tone.
+  if (top.urgent && now - lastUrgent > 2200) {
+    lastUrgent = now;
+    lastAnnounce.set(top.key, now);
+    setStatus(phraseFor(top), "active");
+    vibrate([80, 40, 80]);
+    earcon("error");
+    speak(phraseFor(top), { interrupt: true });
+    return;
+  }
+  // Otherwise speak one fresh item, only when not already talking (calm pace).
+  if (window.speechSynthesis && window.speechSynthesis.speaking) return;
+  for (const it of items.slice(0, 3)) {
+    if (now - (lastAnnounce.get(it.key) || 0) > 4500) {
+      lastAnnounce.set(it.key, now);
+      setStatus(phraseFor(it), "active");
+      speak(phraseFor(it), { interrupt: false });
+      return;
+    }
+  }
+}
+
+function stopAround() {
+  aroundOn = false;
+  if (aroundTimer) { clearTimeout(aroundTimer); aroundTimer = null; }
+  aroundBtn.setAttribute("aria-pressed", "false");
+  try {
+    const ctx = overlayCanvas.getContext("2d");
+    ctx && ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  } catch (_) {}
+  overlayCanvas.hidden = true;
+  earcon("stoplisten");
+  setStatus("Around me is off.", "ok");
+}
+
 // ---- Settings ------------------------------------------------------------
 let speechRatePref = "1";
 function openSettings() {
+  if (aroundOn) stopAround();
   openaiKey.value = keys.openai;
   exaKey.value = keys.exa;
   orsKey.value = keys.ors;
@@ -413,6 +500,7 @@ function saveSettings() {
 
 // ---- Enhance (no network) ------------------------------------------------
 function openEnhance() {
+  if (aroundOn) stopAround();
   // Only offer the flashlight where the camera hardware actually supports it.
   if (supportsTorch()) {
     torchBtn.hidden = false;
@@ -473,6 +561,7 @@ actions.addEventListener("click", (e) => {
   if (!btn) return;
   if (btn.dataset.task) return runTask(btn.dataset.task);
   switch (btn.dataset.open) {
+    case "around":   return toggleAround();
     case "ask":      return openAsk();
     case "navigate": return openNavigate();
     case "enhance":  return openEnhance();
@@ -501,7 +590,7 @@ routeRepeat.addEventListener("click", () => routeSteps.length && showStep(stepId
 routeClose.addEventListener("click", () => { stopSpeaking(); closeOverlay(routeOverlay); });
 
 // Tap the camera itself to Describe (biggest, easiest non-visual target).
-tapCapture.addEventListener("click", () => { if (!anyModalOpen()) runTask("describe"); });
+tapCapture.addEventListener("click", () => { if (!anyModalOpen() && !aroundOn) runTask("describe"); });
 
 // Settings dialog
 settingsSave.addEventListener("click", saveSettings);
