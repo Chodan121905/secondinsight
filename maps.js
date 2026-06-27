@@ -1,14 +1,12 @@
 /* =========================================================================
-   maps.js — blind-first WALKING navigation on FREE, no-billing services:
-     • Map tiles:   OpenStreetMap via Leaflet  (no key)
-     • Search:      OpenRouteService geocoder   (free key, no credit card)
-     • Routing:     OpenRouteService foot-walking (free key)
+   maps.js — CLIENT map DISPLAY only (OpenStreetMap via Leaflet, no key).
 
-   The map is visual sugar for sighted helpers; the spoken, steppable
-   turn-by-turn list is the real output.
+   Geocoding + walking-route planning are done on the SERVER (/api/route) so no
+   maps key is ever in the front end. This module just loads Leaflet, reads the
+   device location, and draws the route the server returns. The map is visual
+   sugar for sighted helpers; the spoken, steppable steps are the real output.
    ========================================================================= */
 
-const ORS = "https://api.openrouteservice.org";
 const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
 const LEAFLET_JS  = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
 
@@ -81,94 +79,8 @@ export function getMap(L, el, center) {
   return map;
 }
 
-function fmtDist(m) {
-  return m < 1000 ? `${Math.round(m)} metres` : `${(m / 1000).toFixed(1)} kilometres`;
-}
-function fmtDur(s) {
-  const min = Math.max(1, Math.round(s / 60));
-  return `${min} minute${min === 1 ? "" : "s"}`;
-}
-function orsError(status, kind) {
-  if (status === 401 || status === 403)
-    return "Your OpenRouteService key was rejected. Check it in Settings.";
-  if (status === 429)
-    return "The free map service is rate-limited right now. Wait a moment and try again.";
-  return kind === "search" ? "Place search failed. Try again." : "Couldn't get directions. Try again.";
-}
-
-// Resolve a spoken destination to a place, biased to the user's surroundings.
-async function geocode(key, query, center) {
-  const url =
-    `${ORS}/geocode/search?api_key=${encodeURIComponent(key)}` +
-    `&text=${encodeURIComponent(query)}&size=1` +
-    `&focus.point.lon=${center.lng}&focus.point.lat=${center.lat}`;
-
-  let res;
-  try { res = await fetch(url); }
-  catch (_) { throw new Error("No network connection. Check your internet and try again."); }
-  if (!res.ok) throw new Error(orsError(res.status, "search"));
-
-  const data = await res.json();
-  const f = data.features && data.features[0];
-  if (!f) throw new Error("I couldn't find that place. Try saying it differently.");
-  return {
-    name: f.properties.name || f.properties.label || query,
-    label: f.properties.label || "",
-    lon: f.geometry.coordinates[0],
-    lat: f.geometry.coordinates[1],
-  };
-}
-
-// Walking route from origin to a destination place.
-async function route(key, origin, dest) {
-  let res;
-  try {
-    res = await fetch(`${ORS}/v2/directions/foot-walking/geojson`, {
-      method: "POST",
-      headers: { Authorization: key, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        coordinates: [[origin.lng, origin.lat], [dest.lon, dest.lat]],
-        instructions: true,
-        units: "m",
-        language: "en",
-      }),
-    });
-  } catch (_) {
-    throw new Error("No network connection. Check your internet and try again.");
-  }
-  if (!res.ok) {
-    if (res.status === 404) throw new Error("I couldn't find a walking route to that place.");
-    throw new Error(orsError(res.status, "route"));
-  }
-
-  const data = await res.json();
-  const feat = data.features && data.features[0];
-  if (!feat) throw new Error("I couldn't find a walking route to that place.");
-  const seg = feat.properties.segments[0];
-  const steps = seg.steps.map((s) => ({
-    text: s.instruction,
-    distance: s.distance ? fmtDist(s.distance) : "",
-  }));
-  const coords = feat.geometry.coordinates.map((c) => [c[1], c[0]]); // [lat,lon]
-  return { steps, coords, distanceText: fmtDist(seg.distance), durationText: fmtDur(seg.duration) };
-}
-
-export async function planWalkingRoute(key, originCoords, query) {
-  if (!key) throw new Error("Add your free OpenRouteService key in Settings first.");
-  const dest = await geocode(key, query, originCoords);
-  const r = await route(key, originCoords, dest);
-  return {
-    destinationName: dest.name,
-    address: dest.label,
-    distanceText: r.distanceText,
-    durationText: r.durationText,
-    steps: r.steps,
-    coords: r.coords,
-    dest,
-  };
-}
-
-// Draw the route line + start/end markers and fit the map to it.
+// Draw the route line + start/end markers and fit the map to it. `coords`,
+// `origin` and `dest` come from the server's /api/route response.
 export function renderRoute(L, mapObj, coords, origin, dest) {
   if (routeLayer) { routeLayer.remove(); routeLayer = null; }
   markers.forEach((m) => m.remove());

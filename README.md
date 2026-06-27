@@ -27,8 +27,9 @@ low-vision users. Point your phone's camera at the world and Second Sight can
 - Speech out: browser **SpeechSynthesis**. Speech in: **SpeechRecognition**
   with a typed-text fallback (voice input is flaky on iOS Safari).
 - Optional enrichment: **Exa /answer** for extra context on medicine labels.
-- API keys are pasted into a settings panel and held **in memory only** for the
-  session — never persisted, never hardcoded.
+- API keys live **only on the server** as environment variables — never in the
+  front end, never on the device, never in this repo. The browser only talks to
+  our own `/api/*` endpoints.
 
 ## Two ways to run
 
@@ -49,7 +50,7 @@ browser never sees them) and stores location for family sharing.
 3. Deploy. Open the Vercel URL on your phone → the app detects the backend and
    **needs no pasted keys**. Family opens `…/family` and enters the share code.
 
-### B) GitHub Pages — static fallback (pasted keys)
+### B) GitHub Pages — on-device only (no keys anywhere)
 
 Zero server. In the repo: **Settings → Pages → Deploy from a branch**, pick
 this branch and `/ (root)`. Live at:
@@ -58,22 +59,24 @@ this branch and `/ (root)`. Live at:
 https://chodan121905.github.io/secondinsight/
 ```
 
-Here the app has no `/api`, so it falls back to keys you paste into Settings
-(memory only). Everything works except family tracking (which needs the
-server). This is the bullet-proof on-stage fallback.
+There is no `/api` here and **the front end never holds keys**, so only the
+**on-device** features work — **Enhance** (zoom/contrast/torch) and **Around
+me** (object detection). The AI features (Describe / Read / Medicine /
+Translate / Ask / Navigate) and family tracking all need the deployed backend.
 
-> **Same codebase, two modes.** On load the app pings `/api/health`; if the
-> backend answers it uses the server (no keys in the UI), otherwise it asks for
-> keys. Nothing to switch by hand.
+> **Keys are never in the front end.** They live only as server environment
+> variables and are reached through `/api/*`. On load the app pings
+> `/api/health`; with a backend it enables the AI features, without one it
+> says so. There is nothing to paste and nothing to switch by hand.
 
 ## Using it
 
 1. Tap anywhere to start the camera.
-2. **Enhance** (the 🔆 button) works immediately with **no key** — zoom +
-   contrast / brighter / black-and-white / invert. This is the offline-safe
-   fallback.
-3. For the AI features, open **⚙️ Settings** and paste your **OpenAI API key**
-   (and optionally an **Exa** key for medicine info). Keys live in memory only.
+2. **Enhance** (the 🔆 button) works immediately with **no key, no server** —
+   zoom + contrast / brighter / black-and-white / invert + torch. The
+   offline-safe fallback.
+3. The AI features need the **deployed backend** (keys in env). No keys are ever
+   entered in the app — if the backend is missing, those buttons say so.
 4. Point the camera and tap **Describe**, **Read text**, **Medicine label**,
    **Translate sign**, or **Ask a question** — results are read aloud and shown
    as large captions. Tap **🔊 Replay** to hear a result again.
@@ -83,10 +86,8 @@ server). This is the bullet-proof on-stage fallback.
    / Repeat) as you walk. A map renders for sighted helpers.
 
    Navigation uses **free, no-billing** services: **OpenStreetMap** tiles via
-   Leaflet (no key) for the map, and **OpenRouteService** for search + walking
-   directions. Get a free ORS key (no credit card) at
-   <https://openrouteservice.org/dev/#/signup>, paste it into **Settings**, and
-   allow location permission.
+   Leaflet (no key) for the map, and **OpenRouteService** (server-side, key in
+   env) for search + walking directions.
 
 6. **👣 Around me (walking awareness):** a hands-free, real-time loop that calls
    out nearby people, vehicles, and objects with rough position and proximity —

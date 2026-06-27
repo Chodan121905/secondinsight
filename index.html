@@ -219,10 +219,12 @@
     <div class="sheet" role="document">
       <h2 id="settingsTitle" class="sheet__title">Settings</h2>
       <p class="muted">
-        Keys are kept in memory for this session only — never saved to this
-        device and only sent to the AI service you choose. Closing the tab
-        clears them. <strong id="serverNote" hidden>This deployment provides
-        keys on the server, so you can leave the key fields blank.</strong>
+        API keys live on the <strong>server</strong> as environment variables —
+        never in this app and never on your device.
+        <strong id="serverNote" hidden>Server connected: AI features are ready.</strong>
+        <strong id="noServerNote" hidden>No server detected — only on-device
+        features (Enhance, Around me) work here. Deploy the backend for the AI
+        features.</strong>
       </p>
 
       <label class="field">
@@ -233,30 +235,6 @@
           <option value="1.4">Fast</option>
           <option value="1.8">Faster</option>
         </select>
-      </label>
-
-      <label class="field">
-        <span class="field__label" id="openaiKeyLabel">OpenAI API key (required)</span>
-        <input id="openaiKey" class="field__input" type="password"
-          aria-labelledby="openaiKeyLabel"
-          autocomplete="off" autocapitalize="off" autocorrect="off"
-          spellcheck="false" placeholder="sk-..." />
-      </label>
-
-      <label class="field">
-        <span class="field__label" id="exaKeyLabel">Exa API key (optional — adds medicine info)</span>
-        <input id="exaKey" class="field__input" type="password"
-          aria-labelledby="exaKeyLabel"
-          autocomplete="off" autocapitalize="off" autocorrect="off"
-          spellcheck="false" placeholder="exa-..." />
-      </label>
-
-      <label class="field">
-        <span class="field__label" id="orsKeyLabel">OpenRouteService key (free — for navigation)</span>
-        <input id="orsKey" class="field__input" type="password"
-          aria-labelledby="orsKeyLabel"
-          autocomplete="off" autocapitalize="off" autocorrect="off"
-          spellcheck="false" placeholder="free key from openrouteservice.org" />
       </label>
 
       <hr class="sep" />

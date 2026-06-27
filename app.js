@@ -11,18 +11,17 @@
 import { startCamera, captureFrame, bindVisibility, isSecure,
          setFilter, setZoom, resetEnhance,
          supportsTorch, setTorch, isTorchOn, frameBrightness } from "./camera.js";
-import { analyzeImage, exaEnrich, TASKS, taskTitle } from "./vision.js";
+import { TASKS, taskTitle } from "./vision.js";
 import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
          earcon, ensureAudio, setSpeechRate } from "./speech.js";
-import { loadMap, getCurrentPosition, getMap,
-         planWalkingRoute, renderRoute } from "./maps.js";
+import { loadMap, getCurrentPosition, getMap, renderRoute } from "./maps.js";
 import { enableExploreByTouch } from "./explore.js";
 import { loadDetector, detectFrame, describeDetections, phraseFor, drawBoxes } from "./detect.js";
 import { initBackend, backendHas, backendUp, visionViaServer, exaViaServer,
          routeViaServer, postLocation } from "./backend.js";
 
-// ---- In-memory session keys (never persisted) ---------------------------
-const keys = { openai: "", exa: "", ors: "" };
+// API keys are NOT handled in the front end — they live on the server as
+// environment variables and are reached only through the /api/* endpoints.
 
 // ---- Element handles -----------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -71,11 +70,9 @@ const routeNext        = $("routeNext");
 const routeClose       = $("routeClose");
 
 const settingsOverlay = $("settingsOverlay");
-const openaiKey   = $("openaiKey");
-const exaKey      = $("exaKey");
-const orsKey      = $("orsKey");
 const speechRate  = $("speechRate");
 const serverNote  = $("serverNote");
+const noServerNote = $("noServerNote");
 const trackName   = $("trackName");
 const trackCode   = $("trackCode");
 const trackShare  = $("trackShare");
@@ -117,10 +114,14 @@ function closeOverlay(overlay) {
   if (lastFocused) { try { lastFocused.focus(); } catch (_) {} }
 }
 
-function needKey(which) {
-  const names = { openai: "OpenAI", ors: "free OpenRouteService" };
-  setStatus(`Add your ${names[which]} key in Settings to use this.`, "error");
-  openSettings();
+// Keyed features come from the server. If the backend (or that feature's env
+// key) isn't there, say so plainly — there's nothing for the user to paste.
+function featureUnavailable(kind) {
+  const msg = {
+    vision: "AI features aren't set up on the server yet.",
+    maps: "Navigation isn't set up on the server yet.",
+  };
+  setStatus(msg[kind] || "This feature isn't available.", "error");
 }
 
 // ---- Reusable voice-input controller (Ask + Navigate share this) --------
@@ -203,7 +204,7 @@ function reportCameraError(err) {
 // ---- The capture → model → speak loop -----------------------------------
 async function runTask(task, question) {
   if (aroundOn) stopAround();
-  if (!backendHas("vision") && !keys.openai) { needKey("openai"); return; }
+  if (!backendHas("vision")) { featureUnavailable("vision"); return; }
   const cfg = TASKS[task] || TASKS.describe;
 
   resultExtra.hidden = true;
@@ -237,9 +238,7 @@ async function runTask(task, question) {
 
   currentAbort = new AbortController();
   try {
-    const text = backendHas("vision")
-      ? await visionViaServer({ task, question, imageDataUrl, signal: currentAbort.signal })
-      : await analyzeImage({ task, question, imageDataUrl, apiKey: keys.openai, signal: currentAbort.signal });
+    const text = await visionViaServer({ task, question, imageDataUrl, signal: currentAbort.signal });
     showResult(text);
     if (task === "medicine") enrich(text);
   } catch (err) {
@@ -269,9 +268,8 @@ function showResultError(message) {
 }
 async function enrich(labelText) {
   try {
-    const extra = backendHas("exa")
-      ? await exaViaServer({ labelText })
-      : (keys.exa ? await exaEnrich({ labelText, apiKey: keys.exa }) : null);
+    if (!backendHas("exa")) return;
+    const extra = await exaViaServer({ labelText });
     if (!extra) return;
     resultExtra.hidden = false;
     resultExtra.textContent = "More info: " + extra;
@@ -306,7 +304,7 @@ let destName = "";
 
 function openNavigate() {
   if (aroundOn) stopAround();
-  if (!backendHas("maps") && !keys.ors) { needKey("ors"); return; }
+  if (!backendHas("maps")) { featureUnavailable("maps"); return; }
   navHeard.textContent = "";
   navInput.value = "";
   openOverlay(navOverlay, voiceInputSupported ? navMic : navInput);
@@ -337,9 +335,7 @@ async function goNavigate() {
     setRouteThinking("Finding the best walking route…");
     const mapObj = getMap(L, mapEl, origin);
     mapEl.hidden = false;
-    const route = backendHas("maps")
-      ? await routeViaServer({ origin, query: dest })
-      : await planWalkingRoute(keys.ors, origin, dest);
+    const route = await routeViaServer({ origin, query: dest });
     renderRoute(L, mapObj, route.coords, origin, route.dest);
     showRoute(route);
   } catch (err) {
@@ -490,7 +486,7 @@ function stopAround() {
 
 // ---- Family location sharing --------------------------------------------
 // When enabled (and a backend is present), the device posts its GPS so family
-// can follow along on /family. Memory-only prefs, consistent with keys.
+// can follow along on /family. Memory-only prefs.
 const tracking = { name: "", code: "", share: false };
 let geoWatchId = null;
 let lastLocPost = 0;
@@ -518,19 +514,14 @@ let speechRatePref = "1";
 function openSettings() {
   if (aroundOn) stopAround();
   serverNote.hidden = !backendUp();
-  openaiKey.value = keys.openai;
-  exaKey.value = keys.exa;
-  orsKey.value = keys.ors;
+  noServerNote.hidden = backendUp();
   speechRate.value = speechRatePref;
   trackName.value = tracking.name;
   trackCode.value = tracking.code;
   trackShare.checked = tracking.share;
-  openOverlay(settingsOverlay, openaiKey);
+  openOverlay(settingsOverlay, speechRate);
 }
 function saveSettings() {
-  keys.openai = openaiKey.value.trim();
-  keys.exa = exaKey.value.trim();
-  keys.ors = orsKey.value.trim();
   speechRatePref = speechRate.value;
   setSpeechRate(speechRatePref);
   tracking.name = trackName.value.trim();
@@ -538,8 +529,7 @@ function saveSettings() {
   tracking.share = trackShare.checked;
   applyTracking();
   closeOverlay(settingsOverlay);
-  const ok = backendHas("vision") || keys.openai;
-  setStatus(ok ? "Settings saved." : "Saved, but no OpenAI key set yet.", "ok");
+  setStatus("Settings saved.", "ok");
 }
 
 // ---- Enhance (no network) ------------------------------------------------
@@ -678,7 +668,7 @@ document.addEventListener("keydown", (e) => {
 
 bindVisibility();
 enableExploreByTouch({ speak, vibrate }); // eyes-free: slide to hear, lift to choose
-initBackend(); // detect server mode (keys in env) vs static fallback (pasted keys)
+initBackend(); // discover the server (keys in env); on-device features work without it
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", onReady);
