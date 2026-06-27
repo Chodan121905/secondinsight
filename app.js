@@ -13,7 +13,7 @@ import { startCamera, captureFrame, bindVisibility, isSecure,
          supportsTorch, setTorch, isTorchOn, frameBrightness } from "./camera.js";
 import { TASKS, taskTitle } from "./vision.js";
 import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
-         earcon, ensureAudio, setSpeechRate } from "./speech.js";
+         earcon, ensureAudio, setSpeechRate, isSpeaking, onSpeakStart } from "./speech.js";
 import { loadMap, getCurrentPosition, getMap, renderRoute } from "./maps.js";
 import { enableExploreByTouch } from "./explore.js";
 import { loadDetector, detectFrame, describeDetections, phraseFor, drawBoxes } from "./detect.js";
@@ -418,12 +418,11 @@ let detector = null;
 let detectTimer = null;
 let narrateTimer = null;
 let lastUrgentAt = 0;
+let lastUrgentKey = "";        // which hazard we last warned about
 let lastRoundupAt = 0;         // last proactive "around you" summary
 let lastRoundupSig = "";       // what that summary contained (skip repeats)
 let lastDets = [];             // most recent detections
 let lastNarration = "";
-
-const isSpeaking = () => !!(window.speechSynthesis && window.speechSynthesis.speaking);
 
 function startAuto() {
   if (autoOn) return;
@@ -433,6 +432,7 @@ function startAuto() {
   lastNarration = "";
   lastRoundupAt = 0;
   lastRoundupSig = "";
+  lastUrgentKey = "";
   setStatus("Watching. I'll tell you what's around you — no buttons needed.", "active");
 
   let intro = "I'm watching now. I'll keep telling you what's around you on my " +
@@ -507,14 +507,18 @@ function handleHazards(items) {
   if (!items.length) return;
   const now = Date.now();
   const top = items[0];
-  // Imminent hazard: interrupt everything with haptic + alert tone.
-  if (top.urgent && now - lastUrgentAt > 2200) {
-    lastUrgentAt = now;
-    setStatus(phraseFor(top), "active");
-    vibrate([80, 40, 80]);
-    earcon("error");
-    speak(phraseFor(top), { interrupt: true });
-  }
+  if (!top.urgent) return;
+  // Imminent hazard interrupts everything — but don't re-cut speech every
+  // second for the SAME close object; only re-warn after it's been quiet a
+  // while or a different hazard appears.
+  const sameAsLast = top.key === lastUrgentKey && now - lastUrgentAt < 5000;
+  if (sameAsLast || now - lastUrgentAt < 2500) return;
+  lastUrgentAt = now;
+  lastUrgentKey = top.key;
+  setStatus(phraseFor(top), "active");
+  vibrate([80, 40, 80]);
+  earcon("error");
+  speak(phraseFor(top), { interrupt: true });
 }
 
 // A blind user can't see the boxes and shouldn't have to ASK what's around
@@ -802,7 +806,9 @@ function welcome() { if (!welcomed) { welcomed = true; ensureAudio(); speak(WELC
 function onReady() {
   try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
   if (!voiceInputSupported) { askVoice.markUnsupported(); navVoice.markUnsupported(); }
-  welcome();
+  // Don't speak here: at load there's been no user gesture, so iOS would block
+  // (and silently "use up") this first utterance, leaving the engine locked.
+  // The welcome speaks on the first tap instead (a gesture), which unlocks TTS.
 }
 
 // ---- Wire up -------------------------------------------------------------
@@ -885,6 +891,11 @@ document.addEventListener("keydown", (e) => {
     }
   });
 });
+
+// The moment we start speaking, drop the mic so it can't hear our own voice
+// (which both garbles recognition and can clip our speech on some phones). The
+// listen loop resumes on its own once we're quiet again.
+onSpeakStart(() => { if (voiceRec) { try { voiceRec.stop(); } catch (_) {} } });
 
 bindVisibility();
 // Suspend/resume the hands-free engine with the tab so it doesn't run (or pay

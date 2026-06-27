@@ -17,18 +17,43 @@ export function setSpeechRate(r) {
   if (!isNaN(n) && n > 0) speechRate = n;
 }
 
+// `speechSynthesis.speaking` is unreliable (sticks true on iOS, lies briefly on
+// others), which made our "don't talk over yourself" guards fail and clip
+// speech. So we track a time-based estimate of when the current/queued speech
+// will finish, and treat THAT as the source of truth for `isSpeaking()`.
+let _endsAt = 0;
+const _startCbs = [];
+
+// Let other modules react the instant we begin speaking (e.g. stop the mic so
+// it doesn't capture our own voice and garble recognition).
+export function onSpeakStart(cb) { if (typeof cb === "function") _startCbs.push(cb); }
+export function isSpeaking() { return Date.now() < _endsAt; }
+
+function estimateMs(text, rate) {
+  const words = String(text).trim().split(/\s+/).filter(Boolean).length || 1;
+  return Math.min(30000, 600 + (words / (2.5 * (rate || 1))) * 1000);
+}
+
 export function speak(text, { rate, interrupt = true } = {}) {
   try {
     if (!text || !("speechSynthesis" in window)) return;
-    if (interrupt) window.speechSynthesis.cancel();
+    const ss = window.speechSynthesis;
+    const r = rate || speechRate;
+    const now = Date.now();
+    // interrupt → replace; otherwise queue after whatever is already going.
+    if (interrupt) { ss.cancel(); _endsAt = now + estimateMs(text, r); }
+    else           { _endsAt = Math.max(_endsAt, now) + estimateMs(text, r); }
+    for (const cb of _startCbs) { try { cb(); } catch (_) {} }
     const u = new SpeechSynthesisUtterance(String(text));
-    u.rate = rate || speechRate;
+    u.rate = r;
     u.lang = "en-US";
-    window.speechSynthesis.speak(u);
+    ss.speak(u);
+    try { ss.resume(); } catch (_) {} // iOS can leave the queue paused
   } catch (_) {}
 }
 
 export function stopSpeaking() {
+  _endsAt = 0;
   try { window.speechSynthesis.cancel(); } catch (_) {}
 }
 

@@ -148,11 +148,14 @@ body {
 /* ---- Status caption --------------------------------------------------- */
 .status {
   position: absolute; z-index: 2; left: 0.75rem; right: 0.75rem; bottom: 0.6rem;
-  margin: 0; padding: 0.7rem 1rem;
-  background: rgba(10,12,16,0.82);
+  margin: 0; padding: 0.6rem 0.9rem;
+  background: rgba(10,12,16,0.86);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   border: 1px solid var(--line); border-radius: var(--radius);
-  font-size: 1.05rem; font-weight: 700; text-align: center; min-height: 1.4em;
+  font-size: 1rem; font-weight: 700; text-align: center; min-height: 1.4em;
+  /* Captions can hold a full narration sentence — cap their height and let
+     them scroll so they never blanket the live camera on a phone. */
+  max-height: 40%; overflow-y: auto; overscroll-behavior: contain;
 }
 .status:empty { display: none; }
 .status--error  { color: var(--danger); border-color: var(--danger); }
@@ -161,9 +164,12 @@ body {
 
 /* ---- Action bar ------------------------------------------------------- */
 .actions {
-  flex: 0 0 auto; width: 100%; max-width: var(--maxw);
+  flex: 0 1 auto; width: 100%; max-width: var(--maxw);
   margin: 0 auto; padding: 0.25rem 0.75rem 0.9rem;
   display: flex; flex-direction: column; gap: 0.6rem;
+  /* The app is hands-free, so these are optional. Keep them from eating the
+     screen: cap the bar and let it scroll, so the camera stays dominant. */
+  max-height: 42svh; overflow-y: auto; overscroll-behavior: contain;
 }
 .actions[hidden] { display: none; }
 
