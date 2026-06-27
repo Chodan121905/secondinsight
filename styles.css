@@ -49,8 +49,9 @@ html, body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font);
-  /* Honor the user's OS text-size preference instead of locking px. */
-  font-size: clamp(1.05rem, 1rem + 0.6vw, 1.35rem);
+  /* Honor the user's OS text-size preference instead of locking px. Sized up
+     for low vision; the user's accessibility text-size settings scale rem. */
+  font-size: clamp(1.15rem, 1.05rem + 0.8vw, 1.5rem);
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -135,24 +136,50 @@ body {
   /* Filters applied in Enhance mode get layered here in a later step. */
 }
 
-/* ---- Start gate ------------------------------------------------------- */
+/* ---- Start gate (one giant tap target = the whole stage) -------------- */
 .start-gate {
   position: absolute;
   inset: 0 0.75rem 0.75rem;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
+  gap: 0.75rem;
   padding: 1.5rem;
   text-align: center;
+  color: var(--ink);
+  font-family: inherit;
   background:
-    radial-gradient(120% 90% at 50% 30%, #11161e 0%, #0a0c10 100%);
+    radial-gradient(120% 90% at 50% 32%, #161d27 0%, #0a0c10 100%);
   border-radius: var(--radius);
-  border: 1px solid var(--line);
+  border: 2px solid var(--amber);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .start-gate[hidden] { display: none; }
-.start-gate__hint { margin: 0; color: var(--ink-dim); max-width: 22rem; }
+.start-gate:active { background: #11161e; }
+.start-gate:focus-visible { outline: 4px solid var(--cyan); outline-offset: -6px; }
+
+.start-gate__icon {
+  font-size: 5rem;
+  line-height: 1;
+  color: var(--amber);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.start-gate__label { font-size: 2rem; font-weight: 700; }
+.start-gate__hint {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 1.15rem;
+  max-width: 24rem;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1);    opacity: 1;   }
+  50%      { transform: scale(1.08); opacity: 0.8; }
+}
 
 /* ---- Buttons ---------------------------------------------------------- */
 .btn {
@@ -189,6 +216,7 @@ body {
 /* ---- Status line ------------------------------------------------------ */
 .status {
   position: absolute;
+  z-index: 2; /* sit above the start gate so "Starting…" is always visible */
   left: 0.75rem;
   right: 0.75rem;
   bottom: 0.75rem;

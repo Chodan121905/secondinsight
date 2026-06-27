@@ -53,16 +53,24 @@
       aria-label="Live camera view"
     ></video>
 
-    <!-- Start gate: iOS requires a user gesture before camera + audio can
-         begin, so we never auto-grab the camera; the user taps to start. -->
-    <div id="startGate" class="start-gate">
-      <button id="startBtn" class="btn btn--primary btn--xl" type="button">
-        Start camera
-      </button>
-      <p class="start-gate__hint">
-        You'll be asked to allow camera access.
-      </p>
-    </div>
+    <!-- Start gate is ONE huge button covering the whole stage: a blind user
+         shouldn't have to locate a small target — tapping (almost) anywhere
+         starts the camera. It's a real <button>, so VoiceOver / TalkBack
+         announce it and let the user double-tap to activate. We focus it on
+         load so the screen reader reads it first. iOS also requires this user
+         gesture before the camera and speech can begin. -->
+    <button
+      id="startBtn"
+      class="start-gate"
+      type="button"
+      aria-describedby="startHint"
+    >
+      <span class="start-gate__icon" aria-hidden="true">◐</span>
+      <span class="start-gate__label">Start camera</span>
+      <span id="startHint" class="start-gate__hint">
+        Tap anywhere to allow camera access and begin.
+      </span>
+    </button>
 
     <!-- Live status line: doubles as a large on-screen caption for sighted
          bystanders and as an aria-live region for screen readers. -->

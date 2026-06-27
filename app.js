@@ -10,13 +10,13 @@
   "use strict";
 
   // ---- Element handles --------------------------------------------------
-  const video     = document.getElementById("camera");
-  const startGate = document.getElementById("startGate");
-  const startBtn  = document.getElementById("startBtn");
+  const video    = document.getElementById("camera");
+  const startBtn  = document.getElementById("startBtn"); // the full-stage gate
   const statusEl  = document.getElementById("status");
 
   // Keep the active stream so we can stop/restart cleanly later.
   let stream = null;
+  let welcomed = false; // have we spoken the welcome yet?
 
   // ---- Tiny feedback helpers (voice-first from the very first screen) ----
 
@@ -90,13 +90,14 @@
       // iOS Safari needs an explicit play() after the user gesture.
       await video.play().catch(() => {});
 
-      startGate.hidden = true;
-      setStatus("Camera ready.", "ok");
+      startBtn.hidden = true;
+      // Tell a non-sighted user what to do next, not just that it "worked".
+      setStatus("Camera ready. Point it at what you want help with.", "ok");
 
-      // Clear the "ready" caption after a moment so it doesn't sit on screen.
+      // Clear the caption after a moment so it doesn't sit on screen.
       setTimeout(() => {
-        if (statusEl.textContent === "Camera ready.") setStatus("");
-      }, 2500);
+        if (statusEl.textContent.startsWith("Camera ready")) setStatus("");
+      }, 3500);
     } catch (err) {
       startBtn.disabled = false;
       reportCameraError(err);
@@ -137,6 +138,40 @@
     stream.getVideoTracks().forEach((t) => (t.enabled = on));
   });
 
+  // ---- Welcome / onboarding (blind-first) --------------------------------
+  // A blind user needs to hear what to do. Two safety nets:
+  //  1) Screen reader: we focus the big Start button on load, so VoiceOver /
+  //     TalkBack immediately read "Start camera … double-tap anywhere…".
+  //  2) Self-voicing: we also try to speak a welcome ourselves, for users who
+  //     aren't running a screen reader. Mobile browsers block speech before
+  //     the first gesture, so if the load-time attempt is muted we speak it
+  //     on the very first touch instead — well before the camera opens.
+  const WELCOME =
+    "Welcome to Second Sight, a spare pair of eyes. " +
+    "Tap anywhere on the screen to start your camera.";
+
+  function welcome() {
+    if (welcomed) return;
+    welcomed = true;
+    speak(WELCOME);
+  }
+
+  function onReady() {
+    // Move focus to the start control so the screen reader announces it.
+    try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
+    // Best-effort spoken welcome (may be blocked until first gesture).
+    welcome();
+  }
+
+  // If the welcome was blocked pre-gesture, guarantee it on first touch.
+  window.addEventListener("pointerdown", welcome, { once: true });
+
   // ---- Wire up -----------------------------------------------------------
   startBtn.addEventListener("click", startCamera);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", onReady);
+  } else {
+    onReady();
+  }
 })();
