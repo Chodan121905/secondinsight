@@ -183,6 +183,12 @@ body {
   min-height: 5.25rem; font-size: 1.45rem;
 }
 .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+/* Quiet section headings that group the optional actions under the hero
+   "Look" button, so it reads as: one main thing first, then extras. */
+.group-label {
+  margin: 0.9rem 0 0.2rem; font-size: 0.95rem; font-weight: 700;
+  letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-dim);
+}
 .action:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
 /* Flagship secondary actions (Around me, Navigate): cyan-edged, distinct from Describe. */
 .action--nav { border-color: var(--cyan); background: var(--surface); }

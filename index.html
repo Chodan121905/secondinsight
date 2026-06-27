@@ -68,7 +68,7 @@
          action: tapping it runs Describe (the most common need). Hidden until
          the camera starts; sits below the status caption. -->
     <button id="tapCapture" class="tap-capture" type="button" hidden
-      aria-label="Describe what the camera sees"></button>
+      aria-label="Tell me what the camera sees"></button>
 
     <!-- Large caption + screen-reader live region for state changes. -->
     <p id="status" class="status" role="status" aria-live="polite"></p>
@@ -77,12 +77,18 @@
   <!-- Action bar: every action is a big, clearly labelled button. Hidden
        until the camera is live. -->
   <nav id="actions" class="actions" aria-label="What can I help with?" hidden>
-    <button class="action action--primary" type="button" data-task="describe">
+    <!-- THE default. The user can't see what's in front of them, so they
+         can't sensibly pick "Read text" vs "Medicine" vs "Translate". This one
+         button captures a frame and lets the AI decide what matters and say
+         it — reading text, handling a medicine label, translating a sign, or
+         describing the scene, automatically. Tapping the camera does the same. -->
+    <button class="action action--primary" type="button" data-task="auto">
       <span class="action__icon" aria-hidden="true">👁️</span>
-      <span class="action__text">Describe what I see</span>
+      <span class="action__text">Look — tell me what's here</span>
     </button>
 
-    <div class="action-grid">
+    <p class="group-label" id="grpMove">On the move</p>
+    <div class="action-grid" aria-describedby="grpMove">
       <button id="aroundBtn" class="action action--nav" type="button" data-open="around" aria-pressed="false">
         <span class="action__icon" aria-hidden="true">👣</span>
         <span class="action__text">Around me</span>
@@ -90,6 +96,17 @@
       <button class="action action--nav" type="button" data-open="navigate">
         <span class="action__icon" aria-hidden="true">🧭</span>
         <span class="action__text">Navigate</span>
+      </button>
+    </div>
+
+    <!-- Optional shortcuts for when the user DOES know they want a focused,
+         structured answer. The default "Look" already covers all of these
+         automatically, so a blind user never has to pick one. -->
+    <p class="group-label" id="grpSpecific">Ask for something specific (optional)</p>
+    <div class="action-grid" aria-describedby="grpSpecific">
+      <button class="action" type="button" data-open="ask">
+        <span class="action__icon" aria-hidden="true">❓</span>
+        <span class="action__text">Ask a question</span>
       </button>
       <button class="action" type="button" data-task="read">
         <span class="action__icon" aria-hidden="true">🔤</span>
@@ -103,10 +120,10 @@
         <span class="action__icon" aria-hidden="true">🌐</span>
         <span class="action__text">Translate sign</span>
       </button>
-      <button class="action" type="button" data-open="ask">
-        <span class="action__icon" aria-hidden="true">❓</span>
-        <span class="action__text">Ask a question</span>
-      </button>
+    </div>
+
+    <p class="group-label" id="grpUtil">Tools</p>
+    <div class="action-grid" aria-describedby="grpUtil">
       <button class="action" type="button" data-open="enhance">
         <span class="action__icon" aria-hidden="true">🔆</span>
         <span class="action__text">Enhance</span>

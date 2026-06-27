@@ -86,7 +86,7 @@ const torchBtn     = $("torchBtn");
 const enhanceReset = $("enhanceReset");
 const enhanceClose = $("enhanceClose");
 
-// Overlays/panels that should suppress the tap-to-describe camera target.
+// Overlays/panels that should suppress the tap-the-camera "Look" target.
 const MODALS = () => [resultOverlay, askOverlay, navOverlay, routeOverlay, settingsOverlay, enhancePanel];
 const anyModalOpen = () => MODALS().some((o) => !o.hidden);
 
@@ -172,8 +172,8 @@ async function start() {
     actions.hidden = false;
     earcon("success");
     setStatus(
-      "Camera ready. Slide your finger over the screen to hear each button, then lift to choose. " +
-      "Or just tap the camera to describe what's in front of you.",
+      "Camera ready. Just tap the camera and I'll tell you what's in front of you. " +
+      "Or slide your finger over the screen to hear each button, then lift to choose.",
       "ok"
     );
     setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 6500);
@@ -228,8 +228,9 @@ async function runTask(task, question) {
   earcon("capture");
 
   // Reading text in the dark is a top blind-user failure mode — warn early so
-  // they can turn on the flashlight (Enhance) and retake.
-  const textTask = task === "read" || task === "medicine" || task === "translate";
+  // they can turn on the flashlight (Enhance) and retake. `auto` may land on
+  // text too, so it gets the same low-light check.
+  const textTask = task === "auto" || task === "read" || task === "medicine" || task === "translate";
   let intro = cfg.title + "…";
   if (textTask && !isTorchOn() && frameBrightness(video) < 55) {
     intro += " It looks dark. Turning on the flashlight in Enhance may help.";
@@ -577,7 +578,9 @@ function resetEnhancements() {
 const WELCOME =
   "Welcome to Second Sight, a spare pair of eyes. " +
   "Tap anywhere on the screen to start your camera. " +
-  "Tip: you can slide your finger around the screen to hear each button, " +
+  "After that, just tap the screen again and I'll tell you what's in front of " +
+  "you — you don't have to pick anything. " +
+  "Tip: you can also slide your finger around the screen to hear each button, " +
   "and lift your finger to choose it.";
 function welcome() { if (!welcomed) { welcomed = true; ensureAudio(); speak(WELCOME); } }
 function onReady() {
@@ -623,8 +626,9 @@ routePrev.addEventListener("click", () => showStep(stepIdx - 1));
 routeRepeat.addEventListener("click", () => routeSteps.length && showStep(stepIdx));
 routeClose.addEventListener("click", () => { stopSpeaking(); closeOverlay(routeOverlay); });
 
-// Tap the camera itself to Describe (biggest, easiest non-visual target).
-tapCapture.addEventListener("click", () => { if (!anyModalOpen() && !aroundOn) runTask("describe"); });
+// Tap the camera itself = the default "Look" (auto-detect): biggest, easiest
+// non-visual target, and the user never has to choose what kind of thing it is.
+tapCapture.addEventListener("click", () => { if (!anyModalOpen() && !aroundOn) runTask("auto"); });
 
 // Settings dialog
 settingsSave.addEventListener("click", saveSettings);

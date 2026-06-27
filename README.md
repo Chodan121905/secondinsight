@@ -1,22 +1,46 @@
 # Second Sight
 
 A mobile-first web app that acts as a spare pair of eyes for blind and
-low-vision users. Point your phone's camera at the world and Second Sight can
-**enhance** the view, **describe** a scene, **read** text and medicine labels,
-**translate** signs, and **answer** spoken questions — out loud.
+low-vision users. Point your phone's camera at the world, tap once, and Second
+Sight figures out **what you're looking at and tells you** — out loud. A blind
+user can't know whether there's text, a medicine label, or a foreign sign in
+front of them, so the app **doesn't make them choose**: one **Look** decides
+and reads the scene, the text, the label (with a pharmacist disclaimer), or a
+translation automatically. It can also **enhance** the view and **answer**
+spoken questions on request.
 
 > Built as a hackathon demo. Designed *for* low-vision users, so the UI itself
 > demonstrates the principles: Atkinson Hyperlegible type, high-contrast dark
 > theme, huge tap targets, and voice-first interaction.
 
-## Two engines, five features
+## Auto-detect first — no mode to pick
+
+The core insight: **a blind user can't sensibly choose "Read text" vs "Medicine
+label" vs "Translate sign"**, because they can't see which one applies. So the
+default isn't a menu — it's a single **Look** (and tapping the camera does the
+same). One capture goes to the model with an *agent* prompt that decides what's
+in front of the user and responds appropriately:
+
+- warns about a hazard first if there is one,
+- says what it's looking at,
+- reads any text — or, if it's a **medicine label**, gives a structured
+  Name / Strength / Form / Directions / Warnings read with a "confirm with your
+  pharmacist" disclaimer,
+- **translates** a non-English sign,
+- otherwise **describes the scene**.
+
+The old per-task buttons (Read text, Medicine, Translate, Ask) still exist as
+**optional** shortcuts for when the user *does* know what they want — but nobody
+has to pick one to get a useful answer.
+
+## Two engines
 
 1. **Enhance** — pure front-end (no network): live camera with zoom + contrast
    / brightness / black-and-white / invert filters. The safety net that works
    even with no wifi or API key.
-2. **Capture → vision model → speak** — one loop, reused for: describe the
-   scene, read text, read a medicine label (with a "confirm with a pharmacist"
-   disclaimer), translate a sign to English, and answer a free-form question.
+2. **Capture → vision model → speak** — one loop. The default **Look** task
+   lets the model auto-detect and respond; the same loop also powers the
+   optional focused tasks (read text, medicine label, translate, ask).
 
 ## Stack
 
@@ -77,9 +101,12 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
    offline-safe fallback.
 3. The AI features need the **deployed backend** (keys in env). No keys are ever
    entered in the app — if the backend is missing, those buttons say so.
-4. Point the camera and tap **Describe**, **Read text**, **Medicine label**,
-   **Translate sign**, or **Ask a question** — results are read aloud and shown
-   as large captions. Tap **🔊 Replay** to hear a result again.
+4. Point the camera and just tap the screen (or **Look — tell me what's here**).
+   The AI decides what's in front of you and reads it aloud — scene, text,
+   medicine label, or translation — no mode to choose. The focused buttons
+   (**Read text**, **Medicine label**, **Translate sign**, **Ask a question**)
+   are there only if you *want* a specific answer. Results are shown as large
+   captions; tap **🔊 Replay** to hear one again.
 5. **🧭 Navigate somewhere:** say or type a destination ("nearest pharmacy",
    an address, a place name). The app finds your location and speaks the best
    **walking route**, then lets you step through each instruction (Next / Back

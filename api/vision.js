@@ -17,6 +17,36 @@ const SYSTEM = [
 ].join("\n");
 
 const TASKS = {
+  // The DEFAULT. The user can't see, so they can't tell you whether this is a
+  // scene, a page of text, a medicine bottle, or a foreign sign — that's the
+  // model's job. Act as an agent: figure out what is most useful and say it,
+  // automatically reading text / handling a medicine label / translating a
+  // sign / warning of hazards, with no mode chosen by the user.
+  auto: { detail: "high", prompt:
+    "Decide, on the user's behalf, what is most useful to tell a blind person " +
+    "about this photo. They cannot see it and have NOT told you what it is. " +
+    "Look at the whole image, then respond out loud including only the parts " +
+    "that apply, in this order:\n" +
+    "1. Hazard first: if there is a clear, present danger (steps or a drop, " +
+    "traffic, an obstacle in the path, fire, a spill), warn in one short " +
+    "sentence before anything else.\n" +
+    "2. In one short sentence, say what the user is most likely looking at " +
+    "(a place or scene, a document or screen, a product or package, a " +
+    "medicine, a sign, a person, etc.).\n" +
+    "3. If the main content is readable text, read it aloud in natural order. " +
+    "But if it looks like a MEDICINE label, instead give each on its own " +
+    "line — Name, Strength, Form, Directions, Warnings — using only what is " +
+    "clearly printed and 'not clearly visible' for anything else, then finish " +
+    "with exactly: 'Always confirm medication details with your pharmacist or " +
+    "doctor.'\n" +
+    "4. If the prominent text is NOT in English, name the language and give a " +
+    "short English translation.\n" +
+    "5. If it is mainly a scene rather than text, describe it in 2 to 4 short " +
+    "sentences: main subject, notable objects, any people and what they seem " +
+    "to be doing, and the setting.\n" +
+    "Never guess or invent. If the photo is too dark, blurry, or cut off to be " +
+    "useful, say that first and suggest holding steadier or using the " +
+    "flashlight." },
   describe: { detail: "auto", prompt:
     "Describe the scene in 2 to 4 short sentences for someone who cannot see " +
     "it. Cover the main subject, notable objects, any people and what they " +
