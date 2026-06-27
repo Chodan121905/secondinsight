@@ -1,0 +1,221 @@
+/* =========================================================================
+   Second Sight — design system
+   -------------------------------------------------------------------------
+   The UI is FOR low-vision users, so the design constraints ARE the brand:
+   - Atkinson Hyperlegible everywhere (disambiguated letterforms).
+   - High-contrast dark theme (less glare than light themes for many
+     low-vision conditions; near-white text on near-black).
+   - Huge tap targets (>= 64px) and large type.
+   - Amber = primary action; Cyan = listening / active. Amber vs cyan stays
+     separable for the common red-green color blindness types.
+   - Visible focus rings, safe-area aware, prefers-reduced-motion honored.
+   ========================================================================= */
+
+:root {
+  /* Surfaces */
+  --bg:            #0a0c10;  /* near-black, not pure black (less halation) */
+  --surface:       #14181f;
+  --surface-2:     #1c222b;
+  --line:          #2a323d;
+
+  /* Text */
+  --ink:           #f6f8fa;  /* near-white primary text */
+  --ink-dim:       #aeb7c2;  /* secondary text, still ~7:1 on --bg */
+
+  /* Accents */
+  --amber:         #ffb300;  /* primary actions */
+  --amber-ink:     #1a1200;  /* text on amber */
+  --cyan:          #2ee6e6;  /* listening / active state */
+  --cyan-ink:      #04201f;  /* text on cyan */
+  --danger:        #ff8a5b;  /* errors — warm orange, not pure red */
+
+  /* Metrics */
+  --tap:           4.5rem;   /* minimum tap target ~72px */
+  --radius:        1rem;
+  --gap:           1rem;
+  --maxw:          34rem;    /* keep things phone-shaped on big screens */
+
+  --font: "Atkinson Hyperlegible", system-ui, -apple-system,
+          "Segoe UI", Roboto, sans-serif;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  /* Honor the user's OS text-size preference instead of locking px. */
+  font-size: clamp(1.05rem, 1rem + 0.6vw, 1.35rem);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  /* Use dynamic viewport height so mobile browser chrome doesn't clip us. */
+  min-height: 100svh;
+  /* Respect notches / home indicators. */
+  padding:
+    env(safe-area-inset-top)
+    env(safe-area-inset-right)
+    env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+/* ---- Skip link (keyboard / screen-reader users) ----------------------- */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -4rem;
+  z-index: 50;
+  background: var(--amber);
+  color: var(--amber-ink);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  font-weight: 700;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus { top: 0.5rem; }
+
+/* ---- Header ----------------------------------------------------------- */
+.app-header {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0.85rem 1.1rem 0.6rem;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.app-title__mark { color: var(--amber); font-size: 1.4em; line-height: 1; }
+
+.app-tagline {
+  margin: 0.1rem 0 0 2.1rem;
+  color: var(--ink-dim);
+  font-size: 0.95rem;
+}
+
+/* ---- Stage (camera) --------------------------------------------------- */
+.stage {
+  flex: 1 1 auto;
+  position: relative;
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 0.75rem 0.75rem;
+  display: flex;
+  outline: none;
+}
+
+.camera {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 50svh;
+  object-fit: cover;
+  background: #000;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  /* Filters applied in Enhance mode get layered here in a later step. */
+}
+
+/* ---- Start gate ------------------------------------------------------- */
+.start-gate {
+  position: absolute;
+  inset: 0 0.75rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  text-align: center;
+  background:
+    radial-gradient(120% 90% at 50% 30%, #11161e 0%, #0a0c10 100%);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+}
+.start-gate[hidden] { display: none; }
+.start-gate__hint { margin: 0; color: var(--ink-dim); max-width: 22rem; }
+
+/* ---- Buttons ---------------------------------------------------------- */
+.btn {
+  appearance: none;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  min-height: var(--tap);
+  padding: 0 1.5rem;
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--surface-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  touch-action: manipulation; /* kill the 300ms tap delay */
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.btn:active { transform: scale(0.97); }
+
+.btn--primary { background: var(--amber); color: var(--amber-ink); }
+.btn--xl { min-height: 5rem; font-size: 1.4rem; padding: 0 2rem; width: 100%; max-width: 22rem; }
+
+/* Visible, high-contrast focus ring for keyboard + switch users. */
+.btn:focus-visible,
+.skip-link:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+/* ---- Status line ------------------------------------------------------ */
+.status {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  margin: 0;
+  padding: 0.7rem 1rem;
+  background: rgba(10, 12, 16, 0.82);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-align: center;
+  min-height: 1.4em;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.status:empty { display: none; }
+.status--error { color: var(--danger); border-color: var(--danger); }
+.status--active { color: var(--cyan); border-color: var(--cyan); }
+.status--ok { color: var(--amber); }
+
+/* ---- Reduced motion --------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

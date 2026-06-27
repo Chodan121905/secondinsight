@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
+  <meta name="theme-color" content="#0a0c10" />
+  <meta name="color-scheme" content="dark" />
+  <!-- iOS: behave more like a standalone app when added to home screen -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Second Sight — a spare pair of eyes</title>
+
+  <!--
+    Atkinson Hyperlegible: designed by the Braille Institute specifically for
+    low-vision readers (letterforms are disambiguated so e.g. I / l / 1 and
+    O / 0 can't be confused). This is a deliberate accessibility choice, not a
+    default. If the network is down on stage, the font falls back gracefully
+    to the system UI stack defined in styles.css.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to camera</a>
+
+  <header class="app-header">
+    <h1 class="app-title">
+      <span class="app-title__mark" aria-hidden="true">◐</span>
+      Second&nbsp;Sight
+    </h1>
+    <p class="app-tagline">A spare pair of eyes</p>
+  </header>
+
+  <main id="main" class="stage" tabindex="-1">
+    <!-- Live camera feed. playsinline is essential on iOS Safari so the video
+         renders in-page instead of hijacking the whole screen. -->
+    <video
+      id="camera"
+      class="camera"
+      playsinline
+      autoplay
+      muted
+      aria-label="Live camera view"
+    ></video>
+
+    <!-- Start gate: iOS requires a user gesture before camera + audio can
+         begin, so we never auto-grab the camera; the user taps to start. -->
+    <div id="startGate" class="start-gate">
+      <button id="startBtn" class="btn btn--primary btn--xl" type="button">
+        Start camera
+      </button>
+      <p class="start-gate__hint">
+        You'll be asked to allow camera access.
+      </p>
+    </div>
+
+    <!-- Live status line: doubles as a large on-screen caption for sighted
+         bystanders and as an aria-live region for screen readers. -->
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
