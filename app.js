@@ -18,7 +18,7 @@ import { loadMap, getCurrentPosition, getMap, renderRoute } from "./maps.js";
 import { enableExploreByTouch } from "./explore.js";
 import { loadDetector, detectFrame, describeDetections, phraseFor, drawBoxes } from "./detect.js";
 import { initBackend, backendHas, backendUp, visionViaServer, exaViaServer,
-         routeViaServer, postLocation } from "./backend.js";
+         routeViaServer, postLocation, intentViaServer } from "./backend.js";
 
 // API keys are NOT handled in the front end — they live on the server as
 // environment variables and are reached only through the /api/* endpoints.
@@ -681,12 +681,13 @@ function extractDestination(t) {
   return dest.trim();
 }
 
-function handleCommand(raw) {
+async function handleCommand(raw) {
   const t = (raw || "").toLowerCase().trim();
   if (!t) return;
   setStatus("Heard: " + t, "");
 
-  // If a walking route is open, spoken words drive the step-by-step.
+  // Instant, latency/safety-critical commands — never wait on the network for
+  // these (you want "stop" to be immediate).
   if (!routeOverlay.hidden) {
     if (said(t, "next", "forward"))   return nextStep();
     if (said(t, "back", "previous"))  return showStep(stepIdx - 1);
@@ -695,22 +696,53 @@ function handleCommand(raw) {
       stopSpeaking(); closeOverlay(routeOverlay); return;
     }
   }
-
-  // Control words first, so "go on" / "continue" resume narration instead of
-  // being mistaken for a "go" destination.
-  if (said(t, "help", "what can i say", "what can you do", "commands")) return sayHelp();
   if (said(t, "stop", "quiet", "silence", "shut up", "pause", "hush"))  return setPaused(true);
   if (said(t, "start", "resume", "continue", "carry on", "go on", "wake up"))
     return narrationPaused ? setPaused(false) : narrateLoop(true);
+  if (said(t, "help", "what can i say", "what can you do", "commands"))  return sayHelp();
 
-  // Navigation, parsed forgivingly: "take me to Orchard", "I want to go to
-  // Orchard", "go orchard", "where is the nearest pharmacy" all route.
+  // Smarter routing: let the AI (OpenAI key on the server) interpret ANY
+  // phrasing — "i wanna head down to orchard", "is this my heart pills" — and
+  // map it to an action. Fall back to local keyword matching if the server
+  // isn't there or the call fails.
+  if (backendHas("vision")) {
+    earcon("capture"); // quick tick so the user knows it heard them
+    const intent = await intentViaServer({ text: raw });
+    if (intent && dispatchIntent(intent, raw)) return;
+  }
+  handleCommandLocal(t, raw);
+}
+
+// Run the structured action the AI returned. Returns true when handled.
+function dispatchIntent(intent, raw) {
+  switch (intent.action) {
+    case "navigate":
+      if (intent.destination) navigateTo(intent.destination);
+      else speak("Where would you like to go? Say, for example, take me to Orchard Road.");
+      return true;
+    case "read":      speakTask("read");      return true;
+    case "medicine":  speakTask("medicine");  return true;
+    case "translate": speakTask("translate"); return true;
+    case "describe":  narrateOnce(true);      return true;
+    case "around":    announceSurroundings(); return true;
+    case "torch":     toggleTorch();          return true;
+    case "repeat":    speak(lastResultText || lastNarration || "There's nothing to repeat yet."); return true;
+    case "stop":      setPaused(true);        return true;
+    case "start":     narrationPaused ? setPaused(false) : narrateLoop(true); return true;
+    case "help":      sayHelp();              return true;
+    case "ask":       speakTask("ask", intent.question || raw); return true;
+    default:          return false;
+  }
+}
+
+// Keyword fallback for when the AI intent parser isn't available (static
+// hosting, or the call failed).
+function handleCommandLocal(t, raw) {
   if (NAV_INTENT.test(t)) {
     const dest = extractDestination(t);
     if (dest) return navigateTo(dest);
     return speak("Where would you like to go? Say, for example, take me to Orchard Road.");
   }
-
   if (said(t, "around", "near me", "nearby", "surroundings"))           return announceSurroundings();
   if (said(t, "medicine", "medication", "pill", "tablet", "prescription")) return speakTask("medicine");
   if (said(t, "translate", "translation"))                             return speakTask("translate");

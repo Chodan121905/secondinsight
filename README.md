@@ -37,10 +37,13 @@ it self-voices), the app **runs itself**:
   objects with rough position ("Around you: a person ahead, and a car on your
   left"), and **interrupts** to warn about anything very close. The user never
   has to ask — because someone who can't see can't know to ask.
-- **Takes spoken commands** (where the browser supports speech input) — say
-  *"read this"*, *"medicine"*, *"translate"*, *"navigate to the nearest
-  pharmacy"*, *"stop"* / *"start"*, or just ask a question. Say *"help"* to hear
-  the list. No button required for any of it.
+- **Takes spoken commands, understood by AI** (where the browser supports speech
+  input) — the transcript goes to the model (`/api/intent`, OpenAI key in env),
+  so *any* phrasing works: *"I wanna head down to Orchard"*, *"is this my heart
+  pills"*, *"it's too dark in here"* all map to the right action. Safety/latency
+  words (*"stop"*, route *"next"/"back"*) are matched instantly on-device; a
+  keyword fallback covers the case where the server isn't reachable. Say
+  *"help"* to hear the list. No button required for any of it.
 
 The on-screen buttons still work, but they're now **optional** — for a sighted
 helper, a low-vision user who prefers tapping, or a browser without voice input.
@@ -201,6 +204,7 @@ whether the client is a phone today or a wearable cam tomorrow.
 | --- | --- | --- |
 | Camera input | `camera.js` (`<video>` source) | ✅ feed a remote/IoT stream |
 | Vision + reasoning | `/api/vision` (gpt-4o) | ✅ device POSTs frames |
+| Command understanding | `/api/intent` (gpt-4o-mini) | ✅ device POSTs the transcript |
 | Object detection | `detect.js` (coco-ssd) | ✅ swap a YOLOv8 ONNX, or move server-side |
 | Navigation | `/api/route` (ORS) | ✅ device POSTs origin + destination |
 | Family tracking | `/api/location` (+ KV) | ✅ device POSTs GPS |

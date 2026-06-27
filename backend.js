@@ -39,6 +39,22 @@ export async function visionViaServer({ task, question, imageDataUrl, signal }) 
   return j.text;
 }
 
+// Ask the server (OpenAI key in env) to interpret a spoken command. Returns
+// { action, destination, question } or null if the server can't help, so the
+// caller can fall back to local keyword matching.
+export async function intentViaServer({ text, signal }) {
+  try {
+    const r = await fetch(`${BASE}/intent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal,
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (_) { return null; }
+}
+
 export async function exaViaServer({ labelText, signal }) {
   try {
     const r = await fetch(`${BASE}/exa`, {
