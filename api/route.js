@@ -9,9 +9,10 @@ module.exports = async (req, res) => {
   if (cors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "POST only." });
 
-  // Trim: pasting a key into a dashboard often leaves a trailing newline/space,
-  // which makes ORS reject an otherwise-valid key.
-  const key = (process.env.ORS_API_KEY || "").trim();
+  // Sanitize: pasting a key into a dashboard often leaves a trailing
+  // newline/space or wrapping quotes, which makes ORS reject an otherwise-valid
+  // key ("Access to this API has been disallowed").
+  const key = (process.env.ORS_API_KEY || "").trim().replace(/^["']|["']$/g, "");
   if (!key) return res.status(500).json({ error: "The server has no maps key configured." });
 
   const { origin, query } = readBody(req);

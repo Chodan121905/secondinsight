@@ -31,7 +31,7 @@ module.exports = async (req, res) => {
       return r.ok ? "ok" : `rejected (HTTP ${r.status})`;
     }, checks),
     validate("maps", present.maps, async () => {
-      const key = (process.env.ORS_API_KEY || "").trim();
+      const key = (process.env.ORS_API_KEY || "").trim().replace(/^["']|["']$/g, "");
       // Routing uses the ORS key (this is the real key test); place-search is
       // keyless via Nominatim now, so test that for availability only.
       let routing = "unreachable", body = "";
