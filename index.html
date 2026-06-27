@@ -73,6 +73,11 @@
       <span class="action__text">Describe what I see</span>
     </button>
 
+    <button class="action action--nav" type="button" data-open="navigate">
+      <span class="action__icon" aria-hidden="true">🧭</span>
+      <span class="action__text">Navigate somewhere</span>
+    </button>
+
     <div class="action-grid">
       <button class="action" type="button" data-task="read">
         <span class="action__icon" aria-hidden="true">🔤</span>
@@ -147,6 +152,56 @@
     </div>
   </div>
 
+  <!-- ===================== Navigate: ask destination ===================== -->
+  <div id="navOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="navTitle" hidden>
+    <div class="sheet" role="document">
+      <h2 id="navTitle" class="sheet__title">Where do you want to go?</h2>
+
+      <button id="navMic" class="btn btn--listen btn--block" type="button">
+        <span aria-hidden="true">🎤</span> <span id="navMicLabel">Tap to speak</span>
+      </button>
+      <p id="navHeard" class="result-text" aria-live="polite"></p>
+
+      <label class="field">
+        <span class="field__label" id="navInputLabel">Or type a destination</span>
+        <input id="navInput" class="field__input" type="text"
+          aria-labelledby="navInputLabel"
+          autocomplete="off" placeholder="e.g. nearest pharmacy" />
+      </label>
+
+      <div class="sheet__actions">
+        <button id="navCancel" class="btn" type="button">Cancel</button>
+        <button id="navGo" class="btn btn--primary" type="button">Get directions</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Navigate: route + step-by-step ===================== -->
+  <div id="routeOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="routeTitle" hidden>
+    <div class="sheet" role="document">
+      <h2 id="routeTitle" class="sheet__title">Walking route</h2>
+
+      <div id="routeThinking" class="thinking" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="routeThinkingText">Finding the best route…</span>
+      </div>
+
+      <!-- Visual map for sighted helpers / low vision; spoken steps are the
+           primary output, so the map is hidden from the accessibility tree. -->
+      <div id="map" class="map" hidden aria-hidden="true"></div>
+
+      <p id="routeSummary" class="result-extra" hidden></p>
+      <p id="routeStep" class="result-text"></p>
+
+      <div class="sheet__actions">
+        <button id="routePrev" class="btn" type="button">◀ Back</button>
+        <button id="routeRepeat" class="btn" type="button"><span aria-hidden="true">🔊</span> Repeat</button>
+        <button id="routeNext" class="btn btn--primary" type="button">Next ▶</button>
+      </div>
+      <button id="routeClose" class="btn btn--block" type="button">Done</button>
+    </div>
+  </div>
+
   <!-- ===================== Settings dialog ===================== -->
   <div id="settingsOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
     <div class="sheet" role="document">
@@ -171,6 +226,14 @@
           aria-labelledby="exaKeyLabel"
           autocomplete="off" autocapitalize="off" autocorrect="off"
           spellcheck="false" placeholder="exa-..." />
+      </label>
+
+      <label class="field">
+        <span class="field__label" id="googleKeyLabel">Google Maps key (optional — for navigation)</span>
+        <input id="googleKey" class="field__input" type="password"
+          aria-labelledby="googleKeyLabel"
+          autocomplete="off" autocapitalize="off" autocorrect="off"
+          spellcheck="false" placeholder="AIza..." />
       </label>
 
       <div class="sheet__actions">

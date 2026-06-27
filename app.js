@@ -1,6 +1,11 @@
 /* =========================================================================
-   app.js — wiring. Keeps state and DOM glue in one place; the real work
-   lives in camera.js / vision.js / speech.js (one concern each).
+   app.js — wiring. State + DOM glue live here; the real work lives in
+   camera.js / vision.js / speech.js / maps.js (one concern each).
+
+   NOTE ON THE CAMERA: camera.js is the ONLY module that touches the video
+   source. Today it's the phone's rear camera (a prototype input); swapping in
+   a future IoT / remote camera means feeding that stream into the same
+   <video> there — nothing else in the app needs to change.
    ========================================================================= */
 
 import { startCamera, captureFrame, bindVisibility, isSecure,
@@ -8,9 +13,11 @@ import { startCamera, captureFrame, bindVisibility, isSecure,
 import { analyzeImage, exaEnrich, TASKS, taskTitle } from "./vision.js";
 import { speak, stopSpeaking, vibrate, voiceInputSupported,
          createRecognizer } from "./speech.js";
+import { loadMapsApi, getCurrentPosition, getMap,
+         planWalkingRoute, renderRoute } from "./maps.js";
 
 // ---- In-memory session keys (never persisted) ---------------------------
-const keys = { openai: "", exa: "" };
+const keys = { openai: "", exa: "", google: "" };
 
 // ---- Element handles -----------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -36,9 +43,29 @@ const askInput   = $("askInput");
 const askSend    = $("askSend");
 const askCancel  = $("askCancel");
 
+const navOverlay = $("navOverlay");
+const navMic      = $("navMic");
+const navMicLabel = $("navMicLabel");
+const navHeard    = $("navHeard");
+const navInput    = $("navInput");
+const navGo       = $("navGo");
+const navCancel   = $("navCancel");
+
+const routeOverlay     = $("routeOverlay");
+const routeThinking    = $("routeThinking");
+const routeThinkingText= $("routeThinkingText");
+const mapEl            = $("map");
+const routeSummary     = $("routeSummary");
+const routeStep        = $("routeStep");
+const routePrev        = $("routePrev");
+const routeRepeat      = $("routeRepeat");
+const routeNext        = $("routeNext");
+const routeClose       = $("routeClose");
+
 const settingsOverlay = $("settingsOverlay");
 const openaiKey   = $("openaiKey");
 const exaKey      = $("exaKey");
+const googleKey   = $("googleKey");
 const settingsSave   = $("settingsSave");
 const settingsCancel = $("settingsCancel");
 
@@ -72,6 +99,44 @@ function closeOverlay(overlay) {
   if (lastFocused) { try { lastFocused.focus(); } catch (_) {} }
 }
 
+function needKey(which) {
+  const names = { openai: "OpenAI", google: "Google Maps" };
+  setStatus(`Add your ${names[which]} key in Settings to use this.`, "error");
+  openSettings();
+}
+
+// ---- Reusable voice-input controller (Ask + Navigate share this) --------
+// Voice in is flaky/absent on iOS Safari, so a typed field is always present;
+// this just layers spoken capture on top of it.
+function makeVoiceControl({ btn, label, heard, input }) {
+  let rec = null;
+  let on = false;
+  function setOn(v) {
+    on = v;
+    btn.classList.toggle("is-listening", v);
+    label.textContent = v ? "Listening… tap to stop" : "Tap to speak";
+    if (v) vibrate(40);
+  }
+  return {
+    toggle() {
+      if (!voiceInputSupported) return;
+      if (on) { rec && rec.stop(); return; }
+      rec = createRecognizer({
+        onInterim: (t) => { heard.textContent = t; input.value = t; },
+        onFinal:   (t) => { heard.textContent = t; input.value = t; },
+        onError:   (m) => { setOn(false); heard.textContent = m; speak(m); },
+        onEnd:     () => setOn(false),
+      });
+      if (!rec) return;
+      setOn(true);
+      rec.start();
+    },
+    stop() { if (on && rec) rec.stop(); },
+    isOn() { return on; },
+    markUnsupported() { btn.disabled = true; label.textContent = "Voice not supported — type below"; },
+  };
+}
+
 // ---- Camera start --------------------------------------------------------
 async function start() {
   if (!isSecure()) {
@@ -86,7 +151,6 @@ async function start() {
     actions.hidden = false;
     setStatus("Camera ready. Choose an action, or point and tap Describe.", "ok");
     setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 4000);
-    // Send a screen-reader/self-voicing user straight to the main action.
     actions.querySelector(".action--primary")?.focus();
   } catch (err) {
     startBtn.disabled = false;
@@ -98,8 +162,7 @@ function reportCameraError(err) {
   const name = err && err.name ? err.name : "";
   let msg;
   switch (name) {
-    case "InsecureContextError":
-      msg = "Camera needs a secure HTTPS connection."; break;
+    case "InsecureContextError": msg = "Camera needs a secure HTTPS connection."; break;
     case "NotAllowedError": case "SecurityError":
       msg = "Camera permission was blocked. Allow camera access in your browser settings, then tap Start camera again."; break;
     case "NotFoundError": case "OverconstrainedError":
@@ -114,11 +177,9 @@ function reportCameraError(err) {
 
 // ---- The capture → model → speak loop -----------------------------------
 async function runTask(task, question) {
-  if (!keys.openai) { needKey(); return; }
+  if (!keys.openai) { needKey("openai"); return; }
   const cfg = TASKS[task] || TASKS.describe;
 
-  // Open result sheet in "thinking" mode and announce the chosen action so a
-  // blind user immediately hears that the right thing is happening.
   resultExtra.hidden = true;
   resultExtra.textContent = "";
   resultText.textContent = "";
@@ -128,7 +189,7 @@ async function runTask(task, question) {
   replayBtn.disabled = true;
   openOverlay(resultOverlay, resultClose);
   vibrate(30);
-  speak(cfg.title + "…");
+  speak(cfg.title + "…"); // confirm the chosen action aloud immediately
 
   let imageDataUrl;
   try {
@@ -158,7 +219,6 @@ function showResult(text) {
   replayBtn.disabled = false;
   speak(text);
 }
-
 function showResultError(message) {
   thinking.hidden = true;
   resultText.textContent = message;
@@ -168,84 +228,151 @@ function showResultError(message) {
   vibrate([120, 60, 120]);
   speak(message);
 }
-
-// Non-blocking Exa enrichment — never breaks/blocks the core label read.
 async function enrich(labelText) {
   try {
     const extra = await exaEnrich({ labelText, apiKey: keys.exa });
     if (!extra) return;
     resultExtra.hidden = false;
     resultExtra.textContent = "More info: " + extra;
-    speak(extra, { interrupt: false }); // queue after the label read
-  } catch (_) { /* enrichment is best-effort */ }
+    speak(extra, { interrupt: false });
+  } catch (_) {}
 }
 
-function needKey() {
-  setStatus("Add your OpenAI key in Settings to use this.", "error");
-  openSettings();
-}
-
-// ---- Ask dialog (voice + typed fallback) --------------------------------
-let recognizer = null;
-let listening = false;
-
+// ---- Ask dialog ----------------------------------------------------------
+const askVoice = makeVoiceControl({ btn: micBtn, label: micLabel, heard: askHeard, input: askInput });
 function openAsk() {
   askHeard.textContent = "";
   askInput.value = "";
-  if (!voiceInputSupported) {
-    micBtn.disabled = true;
-    micLabel.textContent = "Voice not supported — type below";
-  }
   openOverlay(askOverlay, voiceInputSupported ? micBtn : askInput);
 }
-
-function setListening(on) {
-  listening = on;
-  micBtn.classList.toggle("is-listening", on);
-  micLabel.textContent = on ? "Listening… tap to stop" : "Tap to speak";
-  if (on) vibrate(40);
-}
-
-function toggleMic() {
-  if (!voiceInputSupported) return;
-  if (listening) { recognizer?.stop(); return; }
-
-  recognizer = createRecognizer({
-    onInterim: (t) => { askHeard.textContent = t; askInput.value = t; },
-    onFinal:   (t) => { askHeard.textContent = t; askInput.value = t; },
-    onError:   (m) => { setListening(false); askHeard.textContent = m; speak(m); },
-    onEnd:     () => setListening(false),
-  });
-  if (!recognizer) return;
-  setListening(true);
-  recognizer.start();
-}
-
 function sendAsk() {
-  if (listening) recognizer?.stop();
+  askVoice.stop();
   const q = askInput.value.trim();
   if (!q) { speak("Please say or type a question first."); askInput.focus(); return; }
   closeOverlay(askOverlay);
   runTask("ask", q);
 }
 
+// ---- Navigate ------------------------------------------------------------
+const navVoice = makeVoiceControl({ btn: navMic, label: navMicLabel, heard: navHeard, input: navInput });
+let routeSteps = [];
+let stepIdx = 0;
+let destName = "";
+
+function openNavigate() {
+  if (!keys.google) { needKey("google"); return; }
+  navHeard.textContent = "";
+  navInput.value = "";
+  openOverlay(navOverlay, voiceInputSupported ? navMic : navInput);
+}
+
+async function goNavigate() {
+  navVoice.stop();
+  const dest = navInput.value.trim();
+  if (!dest) { speak("Please say or type where you want to go."); navInput.focus(); return; }
+  closeOverlay(navOverlay);
+
+  // Open the route sheet in a thinking state.
+  routeSteps = []; stepIdx = 0;
+  routeSummary.hidden = true; routeSummary.textContent = "";
+  routeStep.textContent = "";
+  mapEl.hidden = true;
+  setRouteThinking("Finding the best walking route…", false);
+  openOverlay(routeOverlay, routeClose);
+  speak("Finding the best walking route to " + dest + ".");
+
+  try {
+    const google = await loadMapsApi(keys.google);
+    setRouteThinking("Getting your location…");
+    const origin = await getCurrentPosition();
+    setRouteThinking("Finding the best walking route…");
+    const mapObj = getMap(google, mapEl, origin);
+    mapEl.hidden = false;
+    const route = await planWalkingRoute(google, origin, dest);
+    renderRoute(route.dirs);
+    showRoute(route);
+  } catch (err) {
+    showRouteError(err.message || "Couldn't get directions. Try again.");
+  }
+}
+
+function setRouteThinking(text, show = true) {
+  routeThinkingText.textContent = text;
+  routeThinking.hidden = !show;
+}
+
+function showRoute(route) {
+  routeThinking.hidden = true;
+  routeSteps = route.steps && route.steps.length ? route.steps : [];
+  destName = route.destinationName || "your destination";
+  stepIdx = 0;
+
+  const summary =
+    `Walking route to ${destName}. About ${route.distanceText}, ${route.durationText}. ` +
+    `${routeSteps.length} step${routeSteps.length === 1 ? "" : "s"}.`;
+  routeSummary.hidden = false;
+  routeSummary.textContent = summary;
+
+  if (!routeSteps.length) {
+    routeStep.textContent = "No detailed steps were returned. Follow the map.";
+    speak(summary, { interrupt: false });
+    routePrev.disabled = routeNext.disabled = true;
+    return;
+  }
+  speak(summary);
+  showStep(0, false); // queue first step after the summary
+}
+
+function showStep(i, interrupt = true) {
+  stepIdx = Math.max(0, Math.min(i, routeSteps.length - 1));
+  const s = routeSteps[stepIdx];
+  const label =
+    `Step ${stepIdx + 1} of ${routeSteps.length}. ${s.text}` +
+    (s.distance ? ` (${s.distance})` : "");
+  routeStep.textContent = label;
+  routePrev.disabled = stepIdx === 0;
+  routeNext.disabled = false; // last press announces arrival
+  speak(label, { interrupt });
+}
+
+function nextStep() {
+  if (stepIdx < routeSteps.length - 1) {
+    showStep(stepIdx + 1);
+  } else {
+    const msg = `That's the last step. You should arrive at ${destName}.`;
+    routeStep.textContent = msg;
+    routeNext.disabled = true;
+    vibrate([40, 40, 40]);
+    speak(msg);
+  }
+}
+function showRouteError(message) {
+  routeThinking.hidden = true;
+  mapEl.hidden = true;
+  routeSummary.hidden = true;
+  routeStep.textContent = message;
+  routePrev.disabled = routeNext.disabled = true;
+  vibrate([120, 60, 120]);
+  speak(message);
+}
+
 // ---- Settings ------------------------------------------------------------
 function openSettings() {
   openaiKey.value = keys.openai;
   exaKey.value = keys.exa;
+  googleKey.value = keys.google;
   openOverlay(settingsOverlay, openaiKey);
 }
 function saveSettings() {
   keys.openai = openaiKey.value.trim();
   keys.exa = exaKey.value.trim();
+  keys.google = googleKey.value.trim();
   closeOverlay(settingsOverlay);
   setStatus(keys.openai ? "Settings saved." : "Saved, but no OpenAI key set yet.", "ok");
 }
 
 // ---- Enhance (no network) ------------------------------------------------
-function openEnhance() {
-  openOverlay(enhancePanel, enhanceClose);
-}
+function openEnhance() { openOverlay(enhancePanel, enhanceClose); }
 function onZoom() {
   const z = parseFloat(zoom.value);
   setZoom(video, z);
@@ -269,11 +396,10 @@ function resetEnhancements() {
 const WELCOME =
   "Welcome to Second Sight, a spare pair of eyes. " +
   "Tap anywhere on the screen to start your camera.";
-
 function welcome() { if (!welcomed) { welcomed = true; speak(WELCOME); } }
-
 function onReady() {
   try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
+  if (!voiceInputSupported) { askVoice.markUnsupported(); navVoice.markUnsupported(); }
   welcome();
 }
 
@@ -281,13 +407,13 @@ function onReady() {
 startBtn.addEventListener("click", start);
 window.addEventListener("pointerdown", welcome, { once: true });
 
-// Action bar (event delegation)
 actions.addEventListener("click", (e) => {
   const btn = e.target.closest("button");
   if (!btn) return;
   if (btn.dataset.task) return runTask(btn.dataset.task);
   switch (btn.dataset.open) {
     case "ask":      return openAsk();
+    case "navigate": return openNavigate();
     case "enhance":  return openEnhance();
     case "settings": return openSettings();
   }
@@ -298,9 +424,20 @@ replayBtn.addEventListener("click", () => speak(lastResultText));
 resultClose.addEventListener("click", () => { currentAbort?.abort(); stopSpeaking(); closeOverlay(resultOverlay); });
 
 // Ask dialog
-micBtn.addEventListener("click", toggleMic);
+micBtn.addEventListener("click", () => askVoice.toggle());
 askSend.addEventListener("click", sendAsk);
-askCancel.addEventListener("click", () => { if (listening) recognizer?.stop(); closeOverlay(askOverlay); });
+askCancel.addEventListener("click", () => { askVoice.stop(); closeOverlay(askOverlay); });
+
+// Navigate dialog
+navMic.addEventListener("click", () => navVoice.toggle());
+navGo.addEventListener("click", goNavigate);
+navCancel.addEventListener("click", () => { navVoice.stop(); closeOverlay(navOverlay); });
+
+// Route stepper
+routeNext.addEventListener("click", nextStep);
+routePrev.addEventListener("click", () => showStep(stepIdx - 1));
+routeRepeat.addEventListener("click", () => routeSteps.length && showStep(stepIdx));
+routeClose.addEventListener("click", () => { stopSpeaking(); closeOverlay(routeOverlay); });
 
 // Settings dialog
 settingsSave.addEventListener("click", saveSettings);
@@ -315,12 +452,14 @@ enhancePanel.addEventListener("click", (e) => {
   if (t) onFilterToggle(t);
 });
 
-// Tap the dark backdrop to dismiss any full overlay.
-[resultOverlay, askOverlay, settingsOverlay].forEach((ov) => {
+// Tap the dark backdrop to dismiss a full overlay.
+[resultOverlay, askOverlay, navOverlay, routeOverlay, settingsOverlay].forEach((ov) => {
   ov.addEventListener("click", (e) => {
     if (e.target !== ov) return;
     if (ov === resultOverlay) { currentAbort?.abort(); stopSpeaking(); }
-    if (ov === askOverlay && listening) recognizer?.stop();
+    if (ov === routeOverlay) stopSpeaking();
+    if (ov === askOverlay) askVoice.stop();
+    if (ov === navOverlay) navVoice.stop();
     closeOverlay(ov);
   });
 });
@@ -328,9 +467,10 @@ enhancePanel.addEventListener("click", (e) => {
 // Escape closes whatever is open.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  [resultOverlay, askOverlay, settingsOverlay, enhancePanel].forEach((ov) => {
+  [resultOverlay, askOverlay, navOverlay, routeOverlay, settingsOverlay, enhancePanel].forEach((ov) => {
     if (!ov.hidden) {
       if (ov === resultOverlay) { currentAbort?.abort(); stopSpeaking(); }
+      if (ov === routeOverlay) stopSpeaking();
       closeOverlay(ov);
     }
   });

@@ -59,6 +59,17 @@ access (except on `localhost`).
 4. Point the camera and tap **Describe**, **Read text**, **Medicine label**,
    **Translate sign**, or **Ask a question** — results are read aloud and shown
    as large captions. Tap **🔊 Replay** to hear a result again.
+5. **🧭 Navigate somewhere:** say or type a destination ("nearest pharmacy",
+   an address, a place name). The app finds your location and speaks the best
+   **walking route**, then lets you step through each instruction (Next / Back
+   / Repeat) as you walk. A map renders for sighted helpers. Requires a
+   **Google Maps key** in Settings (enable *Maps JavaScript API* + *Places
+   API*); needs location permission.
+
+> **Camera is a prototype input.** `camera.js` is the only module bound to the
+> video source, so the phone camera can later be swapped for an IoT / remote
+> camera (stream into the same `<video>`) without touching the AI, speech,
+> navigation, or UI code.
 
 ### Accessibility model
 

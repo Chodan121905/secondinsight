@@ -167,6 +167,15 @@ body {
 }
 .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 .action:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+/* Navigate: flagship, full-width, cyan-edged to read as distinct from Describe. */
+.action--nav { min-height: 4.75rem; font-size: 1.25rem; border-color: var(--cyan); background: var(--surface); }
+
+/* ---- Map (visual aid; spoken steps are primary) ----------------------- */
+.map {
+  width: 100%; height: 13rem; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--surface-2);
+}
+.map[hidden] { display: none; }
 
 /* ---- Buttons ---------------------------------------------------------- */
 .btn {
