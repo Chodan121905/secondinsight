@@ -221,7 +221,8 @@
       <p class="muted">
         Keys are kept in memory for this session only — never saved to this
         device and only sent to the AI service you choose. Closing the tab
-        clears them.
+        clears them. <strong id="serverNote" hidden>This deployment provides
+        keys on the server, so you can leave the key fields blank.</strong>
       </p>
 
       <label class="field">
@@ -257,6 +258,26 @@
           autocomplete="off" autocapitalize="off" autocorrect="off"
           spellcheck="false" placeholder="free key from openrouteservice.org" />
       </label>
+
+      <hr class="sep" />
+      <p class="muted"><strong>Family location sharing</strong> (needs the deployed server)</p>
+
+      <label class="field">
+        <span class="field__label" id="trackNameLabel">Your name (optional)</span>
+        <input id="trackName" class="field__input" type="text"
+          aria-labelledby="trackNameLabel" autocomplete="off" placeholder="e.g. Mum" />
+      </label>
+      <label class="field">
+        <span class="field__label" id="trackCodeLabel">Family share code</span>
+        <input id="trackCode" class="field__input" type="text"
+          aria-labelledby="trackCodeLabel" autocomplete="off"
+          autocapitalize="characters" placeholder="e.g. ROSE-42" />
+      </label>
+      <label class="check">
+        <input id="trackShare" type="checkbox" />
+        <span>Share my live location with family</span>
+      </label>
+      <p class="muted">Family opens <strong>/family</strong> and enters the same code to see you on a map.</p>
 
       <div class="sheet__actions">
         <button id="settingsCancel" class="btn" type="button">Cancel</button>

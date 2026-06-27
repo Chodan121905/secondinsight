@@ -271,6 +271,11 @@ body {
 .field__input:focus-visible { outline: 3px solid var(--cyan); outline-offset: 1px; border-color: var(--cyan); }
 textarea.field__input { min-height: 3.5rem; resize: vertical; }
 
+.sep { border: 0; border-top: 1px solid var(--line); margin: 0.4rem 0; }
+.check { display: flex; align-items: center; gap: 0.7rem; font-weight: 700; min-height: var(--tap); cursor: pointer; }
+.check input { width: 1.6rem; height: 1.6rem; accent-color: var(--amber); flex: 0 0 auto; }
+.check input:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+
 /* ---- Bottom panel (Enhance) ------------------------------------------- */
 .panel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;

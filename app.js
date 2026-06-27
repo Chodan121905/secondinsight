@@ -18,6 +18,8 @@ import { loadMap, getCurrentPosition, getMap,
          planWalkingRoute, renderRoute } from "./maps.js";
 import { enableExploreByTouch } from "./explore.js";
 import { loadDetector, detectFrame, describeDetections, phraseFor, drawBoxes } from "./detect.js";
+import { initBackend, backendHas, backendUp, visionViaServer, exaViaServer,
+         routeViaServer, postLocation } from "./backend.js";
 
 // ---- In-memory session keys (never persisted) ---------------------------
 const keys = { openai: "", exa: "", ors: "" };
@@ -73,6 +75,10 @@ const openaiKey   = $("openaiKey");
 const exaKey      = $("exaKey");
 const orsKey      = $("orsKey");
 const speechRate  = $("speechRate");
+const serverNote  = $("serverNote");
+const trackName   = $("trackName");
+const trackCode   = $("trackCode");
+const trackShare  = $("trackShare");
 const settingsSave   = $("settingsSave");
 const settingsCancel = $("settingsCancel");
 
@@ -197,7 +203,7 @@ function reportCameraError(err) {
 // ---- The capture → model → speak loop -----------------------------------
 async function runTask(task, question) {
   if (aroundOn) stopAround();
-  if (!keys.openai) { needKey("openai"); return; }
+  if (!backendHas("vision") && !keys.openai) { needKey("openai"); return; }
   const cfg = TASKS[task] || TASKS.describe;
 
   resultExtra.hidden = true;
@@ -231,11 +237,11 @@ async function runTask(task, question) {
 
   currentAbort = new AbortController();
   try {
-    const text = await analyzeImage({
-      task, question, imageDataUrl, apiKey: keys.openai, signal: currentAbort.signal,
-    });
+    const text = backendHas("vision")
+      ? await visionViaServer({ task, question, imageDataUrl, signal: currentAbort.signal })
+      : await analyzeImage({ task, question, imageDataUrl, apiKey: keys.openai, signal: currentAbort.signal });
     showResult(text);
-    if (task === "medicine" && keys.exa) enrich(text);
+    if (task === "medicine") enrich(text);
   } catch (err) {
     showResultError(err.message || "Something went wrong. Try again.");
   } finally {
@@ -263,7 +269,9 @@ function showResultError(message) {
 }
 async function enrich(labelText) {
   try {
-    const extra = await exaEnrich({ labelText, apiKey: keys.exa });
+    const extra = backendHas("exa")
+      ? await exaViaServer({ labelText })
+      : (keys.exa ? await exaEnrich({ labelText, apiKey: keys.exa }) : null);
     if (!extra) return;
     resultExtra.hidden = false;
     resultExtra.textContent = "More info: " + extra;
@@ -298,7 +306,7 @@ let destName = "";
 
 function openNavigate() {
   if (aroundOn) stopAround();
-  if (!keys.ors) { needKey("ors"); return; }
+  if (!backendHas("maps") && !keys.ors) { needKey("ors"); return; }
   navHeard.textContent = "";
   navInput.value = "";
   openOverlay(navOverlay, voiceInputSupported ? navMic : navInput);
@@ -329,7 +337,9 @@ async function goNavigate() {
     setRouteThinking("Finding the best walking route…");
     const mapObj = getMap(L, mapEl, origin);
     mapEl.hidden = false;
-    const route = await planWalkingRoute(keys.ors, origin, dest);
+    const route = backendHas("maps")
+      ? await routeViaServer({ origin, query: dest })
+      : await planWalkingRoute(keys.ors, origin, dest);
     renderRoute(L, mapObj, route.coords, origin, route.dest);
     showRoute(route);
   } catch (err) {
@@ -478,14 +488,43 @@ function stopAround() {
   setStatus("Around me is off.", "ok");
 }
 
+// ---- Family location sharing --------------------------------------------
+// When enabled (and a backend is present), the device posts its GPS so family
+// can follow along on /family. Memory-only prefs, consistent with keys.
+const tracking = { name: "", code: "", share: false };
+let geoWatchId = null;
+let lastLocPost = 0;
+
+function applyTracking() {
+  const want = tracking.share && tracking.code && backendUp();
+  if (want && geoWatchId == null && navigator.geolocation) {
+    geoWatchId = navigator.geolocation.watchPosition(onLocation, () => {},
+      { enableHighAccuracy: true, maximumAge: 8000, timeout: 20000 });
+    speak("Location sharing is on.");
+  } else if (!want && geoWatchId != null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+}
+function onLocation(p) {
+  const now = Date.now();
+  if (now - lastLocPost < 5000) return; // throttle posts to ~once per 5s
+  lastLocPost = now;
+  postLocation({ code: tracking.code, name: tracking.name, lat: p.coords.latitude, lng: p.coords.longitude });
+}
+
 // ---- Settings ------------------------------------------------------------
 let speechRatePref = "1";
 function openSettings() {
   if (aroundOn) stopAround();
+  serverNote.hidden = !backendUp();
   openaiKey.value = keys.openai;
   exaKey.value = keys.exa;
   orsKey.value = keys.ors;
   speechRate.value = speechRatePref;
+  trackName.value = tracking.name;
+  trackCode.value = tracking.code;
+  trackShare.checked = tracking.share;
   openOverlay(settingsOverlay, openaiKey);
 }
 function saveSettings() {
@@ -494,8 +533,13 @@ function saveSettings() {
   keys.ors = orsKey.value.trim();
   speechRatePref = speechRate.value;
   setSpeechRate(speechRatePref);
+  tracking.name = trackName.value.trim();
+  tracking.code = trackCode.value.trim();
+  tracking.share = trackShare.checked;
+  applyTracking();
   closeOverlay(settingsOverlay);
-  setStatus(keys.openai ? "Settings saved." : "Saved, but no OpenAI key set yet.", "ok");
+  const ok = backendHas("vision") || keys.openai;
+  setStatus(ok ? "Settings saved." : "Saved, but no OpenAI key set yet.", "ok");
 }
 
 // ---- Enhance (no network) ------------------------------------------------
@@ -634,6 +678,7 @@ document.addEventListener("keydown", (e) => {
 
 bindVisibility();
 enableExploreByTouch({ speak, vibrate }); // eyes-free: slide to hear, lift to choose
+initBackend(); // detect server mode (keys in env) vs static fallback (pasted keys)
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", onReady);

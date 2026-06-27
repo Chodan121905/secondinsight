@@ -30,23 +30,41 @@ low-vision users. Point your phone's camera at the world and Second Sight can
 - API keys are pasted into a settings panel and held **in memory only** for the
   session — never persisted, never hardcoded.
 
-## Run / test on a phone
+## Two ways to run
 
-The camera requires HTTPS, so you can't just open the file. Use one of:
+The camera requires HTTPS, so you can't just open the file.
 
-**GitHub Pages (zero tokens):** in the repo, go to **Settings → Pages →
-Build and deployment → Source: Deploy from a branch**, pick this branch and the
-`/ (root)` folder, Save. After ~1 minute the app is live at:
+### A) Vercel — backend mode (keys in env, automated, + family tracking)
+
+This is the path toward the IoT future: the **server holds the keys** (the
+browser never sees them) and stores location for family sharing.
+
+1. Import the repo into **Vercel** (it auto-detects the static site + the
+   serverless functions in `/api`; no build step).
+2. In **Project → Settings → Environment Variables**, add (see `.env.example`):
+   `OPENAI_API_KEY` (required), `EXA_API_KEY` (optional), `ORS_API_KEY`
+   (optional). For durable family tracking add a **Vercel KV** integration
+   (sets `KV_REST_API_URL` / `KV_REST_API_TOKEN`); without it, tracking still
+   works in-memory for a quick demo.
+3. Deploy. Open the Vercel URL on your phone → the app detects the backend and
+   **needs no pasted keys**. Family opens `…/family` and enters the share code.
+
+### B) GitHub Pages — static fallback (pasted keys)
+
+Zero server. In the repo: **Settings → Pages → Deploy from a branch**, pick
+this branch and `/ (root)`. Live at:
 
 ```
 https://chodan121905.github.io/secondinsight/
 ```
 
-Open that on your phone and tap **Start camera**.
+Here the app has no `/api`, so it falls back to keys you paste into Settings
+(memory only). Everything works except family tracking (which needs the
+server). This is the bullet-proof on-stage fallback.
 
-**Local over your network (HTTPS):** any static server with a TLS cert on the
-same wifi also works; plain `http://` will be blocked by the browser for camera
-access (except on `localhost`).
+> **Same codebase, two modes.** On load the app pings `/api/health`; if the
+> backend answers it uses the server (no keys in the UI), otherwise it asks for
+> keys. Nothing to switch by hand.
 
 ## Using it
 
@@ -84,10 +102,44 @@ access (except on `localhost`).
    `detect.js` is the only module tied to the model, so a real YOLOv8 ONNX model
    can be dropped in later without touching the walking UX.
 
+7. **👪 Family location sharing (backend mode):** in **Settings**, set a name +
+   a hard-to-guess share code and tick *Share my live location*. The device
+   posts its GPS to the server; a family member opens **`/family`**, enters the
+   same code, and watches the live position + recent trail on a map (auto-
+   refreshing). Anyone with the code can view, so treat the code as a secret.
+
 > **Camera is a prototype input.** `camera.js` is the only module bound to the
 > video source, so the phone camera can later be swapped for an IoT / remote
 > camera (stream into the same `<video>`) without touching the AI, speech,
 > navigation, or UI code.
+
+## Architecture & roadmap (toward a headless IoT device)
+
+The app runs in **two modes from one codebase**:
+
+- **Static mode** (`*.js` ES modules, no build): the browser calls OpenAI / Exa
+  / OpenRouteService directly with keys the user pastes (memory only). Great as
+  a zero-infra demo and an on-stage fallback.
+- **Backend mode** (`/api/*` serverless functions on Vercel): keys live in
+  **env vars**, the browser only talks to our own endpoints, and the server
+  stores location for family sharing. The front-end auto-detects this via
+  `/api/health`.
+
+Backend mode is the bridge to the **headless future you described — "just a
+camera, no front-end."** Because the API already accepts a frame and returns
+speakable text (and a route, and detections later), an IoT camera can POST
+frames to `/api/vision` (etc.) and play back the audio, with **no UI to paste
+keys into** — there is no UI. The same `/api/location` powers family tracking
+whether the client is a phone today or a wearable cam tomorrow.
+
+| Concern | Module / endpoint | Swappable for IoT? |
+| --- | --- | --- |
+| Camera input | `camera.js` (`<video>` source) | ✅ feed a remote/IoT stream |
+| Vision + reasoning | `/api/vision` (gpt-4o) | ✅ device POSTs frames |
+| Object detection | `detect.js` (coco-ssd) | ✅ swap a YOLOv8 ONNX, or move server-side |
+| Navigation | `/api/route` (ORS) | ✅ device POSTs origin + destination |
+| Family tracking | `/api/location` (+ KV) | ✅ device POSTs GPS |
+| Keys | server **env vars** | ✅ never on the device |
 
 ### Accessibility model
 

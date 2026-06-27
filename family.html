@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0c10" />
+  <meta name="color-scheme" content="dark" />
+  <title>Second Sight — Family view</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.8rem; }
+    #famMap { width: 100%; height: 58svh; min-height: 18rem; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); }
+    .row { display: flex; gap: 0.6rem; }
+    .row .field__input { flex: 1 1 auto; }
+    .row .btn { flex: 0 0 auto; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title"><span class="app-title__mark" aria-hidden="true">◐</span> Family view</h1>
+    <p class="app-tagline">See where your family member is</p>
+  </header>
+
+  <main class="wrap">
+    <label class="field">
+      <span class="field__label" id="codeLabel">Family share code</span>
+      <div class="row">
+        <input id="code" class="field__input" type="text" aria-labelledby="codeLabel"
+          autocapitalize="characters" placeholder="e.g. ROSE-42" />
+        <button id="watch" class="btn btn--primary" type="button">Watch</button>
+      </div>
+    </label>
+
+    <p id="famStatus" class="status status--active" role="status" aria-live="polite">Enter the code your family member set, then tap Watch.</p>
+
+    <div id="famMap" aria-label="Map showing the location"></div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="family.js"></script>
+</body>
+</html>
