@@ -31,9 +31,27 @@ module.exports = async (req, res) => {
       return r.ok ? "ok" : `rejected (HTTP ${r.status})`;
     }, checks),
     validate("maps", present.maps, async () => {
-      const k = encodeURIComponent((process.env.ORS_API_KEY || "").trim());
-      const r = await fetch(`https://api.openrouteservice.org/geocode/search?api_key=${k}&text=test&size=1`);
-      return r.ok ? "ok" : `rejected (HTTP ${r.status})`;
+      const key = (process.env.ORS_API_KEY || "").trim();
+      // Test geocoding (query-param auth) and routing (header auth) separately
+      // — they authenticate differently, so this shows if only one is failing.
+      const g = await fetch(
+        `https://api.openrouteservice.org/geocode/search?api_key=${encodeURIComponent(key)}&text=test&size=1`);
+      let geocode = g.ok ? "ok" : `HTTP ${g.status}`;
+      let body = "";
+      if (!g.ok) { try { body = (await g.text()).replace(/\s+/g, " ").slice(0, 180); } catch (_) {} }
+
+      let routing;
+      try {
+        const d = await fetch("https://api.openrouteservice.org/v2/directions/foot-walking/geojson", {
+          method: "POST",
+          headers: { Authorization: key, "Content-Type": "application/json" },
+          body: JSON.stringify({ coordinates: [[8.681, 49.411], [8.687, 49.420]] }),
+        });
+        routing = d.ok ? "ok" : `HTTP ${d.status}`;
+      } catch (_) { routing = "unreachable"; }
+
+      if (geocode === "ok" && routing === "ok") return "ok";
+      return `geocode ${geocode}, routing ${routing}${body ? ` — ${body}` : ""}`;
     }, checks),
     validate("exa", present.exa, async () => {
       const r = await fetch("https://api.exa.ai/search", {
