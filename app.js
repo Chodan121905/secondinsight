@@ -418,6 +418,8 @@ let detector = null;
 let detectTimer = null;
 let narrateTimer = null;
 let lastUrgentAt = 0;
+let lastCalmAt = 0;            // last unhurried object callout
+const seenAt = new Map();      // object key -> last time we spoke it (anti-repeat)
 let lastDets = [];             // most recent detections (for "what's around me")
 let lastNarration = "";
 
@@ -429,6 +431,8 @@ function startAuto() {
   narrationPaused = false;
   overlayCanvas.hidden = false;
   lastNarration = "";
+  seenAt.clear();
+  lastCalmAt = 0;
   setStatus("Watching. I'll tell you what's around you — no buttons needed.", "active");
 
   let intro = "I'm watching now. I'll tell you what's around you, and you don't " +
@@ -500,15 +504,33 @@ function handleHazards(items) {
   if (!items.length) return;
   const now = Date.now();
   const top = items[0];
-  // Imminent hazard: interrupt everything with haptic + alert tone. Calm,
-  // non-urgent objects are left to the scene narration / "what's around me"
-  // so we don't bury the user in a constant stream.
+
+  // Imminent hazard: interrupt everything with haptic + alert tone.
   if (top.urgent && now - lastUrgentAt > 2200) {
     lastUrgentAt = now;
+    seenAt.set(top.key, now);
     setStatus(phraseFor(top), "active");
     vibrate([80, 40, 80]);
     earcon("error");
     speak(phraseFor(top), { interrupt: true });
+    return;
+  }
+
+  // The user can't see the boxes, so we SAY what's there too — calmly: only
+  // when nothing else is talking, at an unhurried pace, and without repeating
+  // the same object every second.
+  if (isSpeaking()) return;
+  if (now - lastCalmAt < 2600) return;     // unhurried cadence
+  if (now - lastUrgentAt < 1500) return;   // let a warning breathe
+  for (const it of items.slice(0, 4)) {
+    if (now - (seenAt.get(it.key) || 0) > 7000) {  // don't repeat within 7s
+      seenAt.set(it.key, now);
+      lastCalmAt = now;
+      setStatus(phraseFor(it), "active");
+      earcon("capture");
+      speak(phraseFor(it), { interrupt: false });
+      return;
+    }
   }
 }
 

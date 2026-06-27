@@ -142,13 +142,15 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
    Leaflet (no key) for the map, and **OpenRouteService** (server-side, key in
    env) for search + walking directions.
 
-6. **👣 Walking awareness (always on):** the hazard loop runs automatically as
-   part of hands-free mode — it calls out anything close with rough position and
-   proximity ("Car on your left, very close") with an urgent tone + haptic, and
-   you can ask *"what's around me"* any time for a roundup of nearby people,
-   vehicles, and objects. **Pause** (button or say *"stop"*) quiets everything;
-   **Resume** (or *"start"*) brings it back. Live detection boxes render for
-   sighted helpers.
+6. **👣 Walking awareness (always on):** the detector runs automatically as part
+   of hands-free mode and, because the user can't see the boxes, **speaks what
+   it sees** — it calls out nearby people, vehicles, and objects with rough
+   position and proximity at a calm pace ("Person ahead", "Car on your left,
+   close"), without repeating the same thing every second, and **interrupts with
+   an urgent tone + haptic** when something is very close. Ask *"what's around
+   me"* any time for an on-demand roundup. **Pause** (button or say *"stop"*)
+   quiets everything; **Resume** (or *"start"*) brings it back. Live detection
+   boxes also render for sighted helpers.
 
    Runs on-device with **coco-ssd (MobileNet-SSD)** via TensorFlow.js — a
    **YOLO-style** object detector that needs **no API key, no cost**, and keeps
