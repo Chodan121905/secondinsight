@@ -87,6 +87,11 @@ access (except on `localhost`).
 
 ### Built from a blind user's perspective
 
+- **Explore by touch (works with NO screen reader):** slide a finger around the
+  screen and the button under it is spoken aloud; lift to choose it. A quick tap
+  still behaves normally, and mouse users never trigger it. This is how a blind
+  user *chooses* anything when they aren't running VoiceOver/TalkBack — and when
+  they are, the OS handles touch and this stays out of the way.
 - **Tap the camera to Describe** — the camera is the biggest thing on screen,
   so it *is* the primary action; no hunting for a button.
 - **Flashlight + low-light warning** — reading a label in dim light is a top

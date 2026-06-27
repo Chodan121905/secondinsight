@@ -16,6 +16,7 @@ import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
          earcon, ensureAudio, setSpeechRate } from "./speech.js";
 import { loadMap, getCurrentPosition, getMap,
          planWalkingRoute, renderRoute } from "./maps.js";
+import { enableExploreByTouch } from "./explore.js";
 
 // ---- In-memory session keys (never persisted) ---------------------------
 const keys = { openai: "", exa: "", ors: "" };
@@ -160,8 +161,12 @@ async function start() {
     tapCapture.hidden = false;
     actions.hidden = false;
     earcon("success");
-    setStatus("Camera ready. Tap the camera to describe what you see, or choose an action below.", "ok");
-    setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 5000);
+    setStatus(
+      "Camera ready. Slide your finger over the screen to hear each button, then lift to choose. " +
+      "Or just tap the camera to describe what's in front of you.",
+      "ok"
+    );
+    setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 6500);
     actions.querySelector(".action--primary")?.focus();
   } catch (err) {
     startBtn.disabled = false;
@@ -268,6 +273,9 @@ function openAsk() {
   askHeard.textContent = "";
   askInput.value = "";
   openOverlay(askOverlay, voiceInputSupported ? micBtn : askInput);
+  speak(voiceInputSupported
+    ? "Ask about what you see. Tap to speak your question, or type it."
+    : "Ask about what you see. Type your question, then choose Ask.");
 }
 function sendAsk() {
   askVoice.stop();
@@ -288,6 +296,9 @@ function openNavigate() {
   navHeard.textContent = "";
   navInput.value = "";
   openOverlay(navOverlay, voiceInputSupported ? navMic : navInput);
+  speak(voiceInputSupported
+    ? "Where do you want to go? Tap to speak a destination, or type it."
+    : "Where do you want to go? Type a destination, then choose Get directions.");
 }
 
 async function goNavigate() {
@@ -443,7 +454,9 @@ function resetEnhancements() {
 // ---- Welcome / onboarding (blind-first) ---------------------------------
 const WELCOME =
   "Welcome to Second Sight, a spare pair of eyes. " +
-  "Tap anywhere on the screen to start your camera.";
+  "Tap anywhere on the screen to start your camera. " +
+  "Tip: you can slide your finger around the screen to hear each button, " +
+  "and lift your finger to choose it.";
 function welcome() { if (!welcomed) { welcomed = true; ensureAudio(); speak(WELCOME); } }
 function onReady() {
   try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
@@ -531,6 +544,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 bindVisibility();
+enableExploreByTouch({ speak, vibrate }); // eyes-free: slide to hear, lift to choose
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", onReady);
