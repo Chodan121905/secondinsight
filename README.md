@@ -47,3 +47,25 @@ Open that on your phone and tap **Start camera**.
 **Local over your network (HTTPS):** any static server with a TLS cert on the
 same wifi also works; plain `http://` will be blocked by the browser for camera
 access (except on `localhost`).
+
+## Using it
+
+1. Tap anywhere to start the camera.
+2. **Enhance** (the 🔆 button) works immediately with **no key** — zoom +
+   contrast / brighter / black-and-white / invert. This is the offline-safe
+   fallback.
+3. For the AI features, open **⚙️ Settings** and paste your **OpenAI API key**
+   (and optionally an **Exa** key for medicine info). Keys live in memory only.
+4. Point the camera and tap **Describe**, **Read text**, **Medicine label**,
+   **Translate sign**, or **Ask a question** — results are read aloud and shown
+   as large captions. Tap **🔊 Replay** to hear a result again.
+
+### Accessibility model
+
+- **Self-voicing:** the app speaks to you (welcome, chosen action, results,
+  errors) even with no screen reader running.
+- **Screen-reader-native:** every control is a labelled button; focus is
+  managed so VoiceOver / TalkBack announce the right thing.
+- **Large-print visual:** Atkinson Hyperlegible, high-contrast dark theme,
+  ≥72px tap targets, amber=action / cyan=listening, visible focus rings,
+  reduced-motion respected.

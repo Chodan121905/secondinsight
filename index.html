@@ -8,7 +8,6 @@
   />
   <meta name="theme-color" content="#0a0c10" />
   <meta name="color-scheme" content="dark" />
-  <!-- iOS: behave more like a standalone app when added to home screen -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -16,10 +15,9 @@
 
   <!--
     Atkinson Hyperlegible: designed by the Braille Institute specifically for
-    low-vision readers (letterforms are disambiguated so e.g. I / l / 1 and
-    O / 0 can't be confused). This is a deliberate accessibility choice, not a
-    default. If the network is down on stage, the font falls back gracefully
-    to the system UI stack defined in styles.css.
+    low-vision readers (letterforms disambiguated so I / l / 1 and O / 0 can't
+    be confused). A deliberate accessibility choice, with a graceful system
+    fallback if the network is down on stage.
   -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -31,7 +29,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to camera</a>
+  <a class="skip-link" href="#actions">Skip to actions</a>
 
   <header class="app-header">
     <h1 class="app-title">
@@ -42,8 +40,6 @@
   </header>
 
   <main id="main" class="stage" tabindex="-1">
-    <!-- Live camera feed. playsinline is essential on iOS Safari so the video
-         renders in-page instead of hijacking the whole screen. -->
     <video
       id="camera"
       class="camera"
@@ -53,18 +49,11 @@
       aria-label="Live camera view"
     ></video>
 
-    <!-- Start gate is ONE huge button covering the whole stage: a blind user
-         shouldn't have to locate a small target — tapping (almost) anywhere
-         starts the camera. It's a real <button>, so VoiceOver / TalkBack
-         announce it and let the user double-tap to activate. We focus it on
-         load so the screen reader reads it first. iOS also requires this user
-         gesture before the camera and speech can begin. -->
-    <button
-      id="startBtn"
-      class="start-gate"
-      type="button"
-      aria-describedby="startHint"
-    >
+    <!-- Start gate = one giant button covering the stage: a blind user
+         shouldn't hunt for a target. Real <button> so VoiceOver/TalkBack
+         announce it; focused on load. Also satisfies iOS's gesture
+         requirement before camera + speech can begin. -->
+    <button id="startBtn" class="start-gate" type="button" aria-describedby="startHint">
       <span class="start-gate__icon" aria-hidden="true">◐</span>
       <span class="start-gate__label">Start camera</span>
       <span id="startHint" class="start-gate__hint">
@@ -72,11 +61,149 @@
       </span>
     </button>
 
-    <!-- Live status line: doubles as a large on-screen caption for sighted
-         bystanders and as an aria-live region for screen readers. -->
+    <!-- Large caption + screen-reader live region for state changes. -->
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </main>
 
-  <script src="app.js"></script>
+  <!-- Action bar: every action is a big, clearly labelled button. Hidden
+       until the camera is live. -->
+  <nav id="actions" class="actions" aria-label="What can I help with?" hidden>
+    <button class="action action--primary" type="button" data-task="describe">
+      <span class="action__icon" aria-hidden="true">👁️</span>
+      <span class="action__text">Describe what I see</span>
+    </button>
+
+    <div class="action-grid">
+      <button class="action" type="button" data-task="read">
+        <span class="action__icon" aria-hidden="true">🔤</span>
+        <span class="action__text">Read text</span>
+      </button>
+      <button class="action" type="button" data-task="medicine">
+        <span class="action__icon" aria-hidden="true">💊</span>
+        <span class="action__text">Medicine label</span>
+      </button>
+      <button class="action" type="button" data-task="translate">
+        <span class="action__icon" aria-hidden="true">🌐</span>
+        <span class="action__text">Translate sign</span>
+      </button>
+      <button class="action" type="button" data-open="ask">
+        <span class="action__icon" aria-hidden="true">❓</span>
+        <span class="action__text">Ask a question</span>
+      </button>
+      <button class="action" type="button" data-open="enhance">
+        <span class="action__icon" aria-hidden="true">🔆</span>
+        <span class="action__text">Enhance</span>
+      </button>
+      <button class="action" type="button" data-open="settings">
+        <span class="action__icon" aria-hidden="true">⚙️</span>
+        <span class="action__text">Settings</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ===================== Result dialog ===================== -->
+  <div id="resultOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
+    <div class="sheet" role="document">
+      <h2 id="resultTitle" class="sheet__title">Result</h2>
+
+      <div id="thinking" class="thinking" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="thinkingText">Looking…</span>
+      </div>
+
+      <p id="resultText" class="result-text"></p>
+      <p id="resultExtra" class="result-extra" hidden></p>
+
+      <div class="sheet__actions">
+        <button id="replayBtn" class="btn" type="button">
+          <span aria-hidden="true">🔊</span> Replay
+        </button>
+        <button id="resultClose" class="btn btn--primary" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Ask dialog ===================== -->
+  <div id="askOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="askTitle" hidden>
+    <div class="sheet" role="document">
+      <h2 id="askTitle" class="sheet__title">Ask about what you see</h2>
+
+      <button id="micBtn" class="btn btn--listen btn--block" type="button">
+        <span aria-hidden="true">🎤</span> <span id="micLabel">Tap to speak</span>
+      </button>
+      <p id="askHeard" class="result-text" aria-live="polite"></p>
+
+      <label class="field">
+        <span class="field__label" id="askInputLabel">Or type your question</span>
+        <textarea id="askInput" class="field__input" rows="2"
+          aria-labelledby="askInputLabel"
+          placeholder="e.g. What colour is this shirt?"></textarea>
+      </label>
+
+      <div class="sheet__actions">
+        <button id="askCancel" class="btn" type="button">Cancel</button>
+        <button id="askSend" class="btn btn--primary" type="button">Ask</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Settings dialog ===================== -->
+  <div id="settingsOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+    <div class="sheet" role="document">
+      <h2 id="settingsTitle" class="sheet__title">Settings</h2>
+      <p class="muted">
+        Keys are kept in memory for this session only — never saved to this
+        device and only sent to the AI service you choose. Closing the tab
+        clears them.
+      </p>
+
+      <label class="field">
+        <span class="field__label" id="openaiKeyLabel">OpenAI API key (required)</span>
+        <input id="openaiKey" class="field__input" type="password"
+          aria-labelledby="openaiKeyLabel"
+          autocomplete="off" autocapitalize="off" autocorrect="off"
+          spellcheck="false" placeholder="sk-..." />
+      </label>
+
+      <label class="field">
+        <span class="field__label" id="exaKeyLabel">Exa API key (optional — adds medicine info)</span>
+        <input id="exaKey" class="field__input" type="password"
+          aria-labelledby="exaKeyLabel"
+          autocomplete="off" autocapitalize="off" autocorrect="off"
+          spellcheck="false" placeholder="exa-..." />
+      </label>
+
+      <div class="sheet__actions">
+        <button id="settingsCancel" class="btn" type="button">Cancel</button>
+        <button id="settingsSave" class="btn btn--primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Enhance panel (no network) ===================== -->
+  <!-- Docked at the bottom so the live, filtered camera stays visible above. -->
+  <div id="enhancePanel" class="panel" role="dialog" aria-modal="true" aria-labelledby="enhanceTitle" hidden>
+    <div class="panel__head">
+      <h2 id="enhanceTitle" class="sheet__title">Enhance</h2>
+      <button id="enhanceClose" class="btn btn--primary btn--sm" type="button">Done</button>
+    </div>
+
+    <label class="field">
+      <span class="field__label" id="zoomLabel">Zoom: <span id="zoomValue">1.0×</span></span>
+      <input id="zoom" class="slider" type="range" min="1" max="5" step="0.1" value="1"
+        aria-labelledby="zoomLabel" />
+    </label>
+
+    <div class="toggle-grid">
+      <button class="toggle" type="button" data-filter="contrast" aria-pressed="false">High contrast</button>
+      <button class="toggle" type="button" data-filter="bright" aria-pressed="false">Brighter</button>
+      <button class="toggle" type="button" data-filter="grayscale" aria-pressed="false">Black &amp; white</button>
+      <button class="toggle" type="button" data-filter="invert" aria-pressed="false">Invert</button>
+    </div>
+
+    <button id="enhanceReset" class="btn btn--block" type="button">Reset enhancements</button>
+  </div>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>

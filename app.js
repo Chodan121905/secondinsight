@@ -1,177 +1,345 @@
 /* =========================================================================
-   Second Sight — app.js
-   -------------------------------------------------------------------------
-   STEP 1: get the rear camera live on a real phone over HTTPS.
-   Kept intentionally small and dependency-free so it can be debugged live.
-   Later steps (enhance filters, vision calls, speech, settings) layer on top.
+   app.js — wiring. Keeps state and DOM glue in one place; the real work
+   lives in camera.js / vision.js / speech.js (one concern each).
    ========================================================================= */
 
-(function () {
-  "use strict";
+import { startCamera, captureFrame, bindVisibility, isSecure,
+         setFilter, setZoom, resetEnhance } from "./camera.js";
+import { analyzeImage, exaEnrich, TASKS, taskTitle } from "./vision.js";
+import { speak, stopSpeaking, vibrate, voiceInputSupported,
+         createRecognizer } from "./speech.js";
 
-  // ---- Element handles --------------------------------------------------
-  const video    = document.getElementById("camera");
-  const startBtn  = document.getElementById("startBtn"); // the full-stage gate
-  const statusEl  = document.getElementById("status");
+// ---- In-memory session keys (never persisted) ---------------------------
+const keys = { openai: "", exa: "" };
 
-  // Keep the active stream so we can stop/restart cleanly later.
-  let stream = null;
-  let welcomed = false; // have we spoken the welcome yet?
+// ---- Element handles -----------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const video    = $("camera");
+const startBtn = $("startBtn");
+const statusEl = $("status");
+const actions  = $("actions");
 
-  // ---- Tiny feedback helpers (voice-first from the very first screen) ----
+const resultOverlay = $("resultOverlay");
+const resultTitle   = $("resultTitle");
+const resultText    = $("resultText");
+const resultExtra   = $("resultExtra");
+const thinking      = $("thinking");
+const thinkingText  = $("thinkingText");
+const replayBtn     = $("replayBtn");
+const resultClose   = $("resultClose");
 
-  // Speak a short message aloud. Wrapped in try/catch because SpeechSynthesis
-  // is unavailable or blocked in some embedded webviews.
-  function speak(text) {
-    try {
-      if (!("speechSynthesis" in window)) return;
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.0;
-      u.lang = "en-US";
-      window.speechSynthesis.speak(u);
-    } catch (_) {
-      /* speech is a non-critical enhancement; never let it throw */
-    }
+const askOverlay = $("askOverlay");
+const micBtn     = $("micBtn");
+const micLabel   = $("micLabel");
+const askHeard   = $("askHeard");
+const askInput   = $("askInput");
+const askSend    = $("askSend");
+const askCancel  = $("askCancel");
+
+const settingsOverlay = $("settingsOverlay");
+const openaiKey   = $("openaiKey");
+const exaKey      = $("exaKey");
+const settingsSave   = $("settingsSave");
+const settingsCancel = $("settingsCancel");
+
+const enhancePanel = $("enhancePanel");
+const zoom         = $("zoom");
+const zoomValue    = $("zoomValue");
+const enhanceReset = $("enhanceReset");
+const enhanceClose = $("enhanceClose");
+
+let welcomed = false;
+let lastResultText = "";
+let lastFocused = null;
+let currentAbort = null;
+
+// ---- Status caption (large print + spoken) ------------------------------
+function setStatus(text, tone) {
+  statusEl.textContent = text || "";
+  statusEl.className = "status" + (tone ? " status--" + tone : "");
+  if (tone === "error") { vibrate([120, 60, 120]); speak(text); }
+  else if (tone === "ok") { vibrate(40); speak(text); }
+}
+
+// ---- Overlay helpers (focus management for screen readers) --------------
+function openOverlay(overlay, focusEl) {
+  lastFocused = document.activeElement;
+  overlay.hidden = false;
+  (focusEl || overlay.querySelector("button, textarea, input"))?.focus();
+}
+function closeOverlay(overlay) {
+  overlay.hidden = true;
+  if (lastFocused) { try { lastFocused.focus(); } catch (_) {} }
+}
+
+// ---- Camera start --------------------------------------------------------
+async function start() {
+  if (!isSecure()) {
+    setStatus("Camera needs a secure HTTPS connection. Open this page over https.", "error");
+    return;
+  }
+  startBtn.disabled = true;
+  setStatus("Starting camera…", "active");
+  try {
+    await startCamera(video);
+    startBtn.hidden = true;
+    actions.hidden = false;
+    setStatus("Camera ready. Choose an action, or point and tap Describe.", "ok");
+    setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 4000);
+    // Send a screen-reader/self-voicing user straight to the main action.
+    actions.querySelector(".action--primary")?.focus();
+  } catch (err) {
+    startBtn.disabled = false;
+    reportCameraError(err);
+  }
+}
+
+function reportCameraError(err) {
+  const name = err && err.name ? err.name : "";
+  let msg;
+  switch (name) {
+    case "InsecureContextError":
+      msg = "Camera needs a secure HTTPS connection."; break;
+    case "NotAllowedError": case "SecurityError":
+      msg = "Camera permission was blocked. Allow camera access in your browser settings, then tap Start camera again."; break;
+    case "NotFoundError": case "OverconstrainedError":
+      msg = "No usable camera was found on this device."; break;
+    case "NotReadableError":
+      msg = "The camera is busy in another app. Close it and tap Start camera again."; break;
+    default:
+      msg = "Could not start the camera. Tap Start camera to try again.";
+  }
+  setStatus(msg, "error");
+}
+
+// ---- The capture → model → speak loop -----------------------------------
+async function runTask(task, question) {
+  if (!keys.openai) { needKey(); return; }
+  const cfg = TASKS[task] || TASKS.describe;
+
+  // Open result sheet in "thinking" mode and announce the chosen action so a
+  // blind user immediately hears that the right thing is happening.
+  resultExtra.hidden = true;
+  resultExtra.textContent = "";
+  resultText.textContent = "";
+  resultTitle.textContent = taskTitle(task);
+  thinkingText.textContent = "Looking…";
+  thinking.hidden = false;
+  replayBtn.disabled = true;
+  openOverlay(resultOverlay, resultClose);
+  vibrate(30);
+  speak(cfg.title + "…");
+
+  let imageDataUrl;
+  try {
+    imageDataUrl = captureFrame(video, cfg.maxDim);
+  } catch (_) {
+    return showResultError("Couldn't capture a frame from the camera. Try again.");
   }
 
-  // Short haptic tap where supported (Android Chrome). No-op on iOS Safari.
-  function buzz(pattern) {
-    try {
-      if (navigator.vibrate) navigator.vibrate(pattern);
-    } catch (_) {}
+  currentAbort = new AbortController();
+  try {
+    const text = await analyzeImage({
+      task, question, imageDataUrl, apiKey: keys.openai, signal: currentAbort.signal,
+    });
+    showResult(text);
+    if (task === "medicine" && keys.exa) enrich(text);
+  } catch (err) {
+    showResultError(err.message || "Something went wrong. Try again.");
+  } finally {
+    currentAbort = null;
   }
+}
 
-  // Update the on-screen caption. `tone` drives the color treatment and
-  // whether we announce it aloud.
-  function setStatus(text, tone) {
-    statusEl.textContent = text || "";
-    statusEl.className = "status" + (tone ? " status--" + tone : "");
-    if (tone === "error") {
-      buzz([120, 60, 120]);
-      speak(text);
-    } else if (tone === "ok") {
-      buzz(40);
-      speak(text);
-    }
+function showResult(text) {
+  thinking.hidden = true;
+  lastResultText = text;
+  resultText.textContent = text;
+  replayBtn.disabled = false;
+  speak(text);
+}
+
+function showResultError(message) {
+  thinking.hidden = true;
+  resultText.textContent = message;
+  resultTitle.textContent = "Sorry";
+  lastResultText = message;
+  replayBtn.disabled = false;
+  vibrate([120, 60, 120]);
+  speak(message);
+}
+
+// Non-blocking Exa enrichment — never breaks/blocks the core label read.
+async function enrich(labelText) {
+  try {
+    const extra = await exaEnrich({ labelText, apiKey: keys.exa });
+    if (!extra) return;
+    resultExtra.hidden = false;
+    resultExtra.textContent = "More info: " + extra;
+    speak(extra, { interrupt: false }); // queue after the label read
+  } catch (_) { /* enrichment is best-effort */ }
+}
+
+function needKey() {
+  setStatus("Add your OpenAI key in Settings to use this.", "error");
+  openSettings();
+}
+
+// ---- Ask dialog (voice + typed fallback) --------------------------------
+let recognizer = null;
+let listening = false;
+
+function openAsk() {
+  askHeard.textContent = "";
+  askInput.value = "";
+  if (!voiceInputSupported) {
+    micBtn.disabled = true;
+    micLabel.textContent = "Voice not supported — type below";
   }
+  openOverlay(askOverlay, voiceInputSupported ? micBtn : askInput);
+}
 
-  // ---- Camera ------------------------------------------------------------
+function setListening(on) {
+  listening = on;
+  micBtn.classList.toggle("is-listening", on);
+  micLabel.textContent = on ? "Listening… tap to stop" : "Tap to speak";
+  if (on) vibrate(40);
+}
 
-  async function startCamera() {
-    // Guard: getUserMedia only exists in secure contexts (HTTPS / localhost).
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setStatus(
-        "Camera needs a secure HTTPS connection. Open this page over https.",
-        "error"
-      );
-      return;
-    }
+function toggleMic() {
+  if (!voiceInputSupported) return;
+  if (listening) { recognizer?.stop(); return; }
 
-    startBtn.disabled = true;
-    setStatus("Starting camera…", "active");
-
-    // Prefer the rear ("environment") camera — that's what a user points at
-    // the world. `ideal` (not `exact`) so devices with only a front camera
-    // still work instead of hard-failing.
-    const constraints = {
-      audio: false,
-      video: {
-        facingMode: { ideal: "environment" },
-        width:  { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-    };
-
-    try {
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
-      video.srcObject = stream;
-
-      // iOS Safari needs an explicit play() after the user gesture.
-      await video.play().catch(() => {});
-
-      startBtn.hidden = true;
-      // Tell a non-sighted user what to do next, not just that it "worked".
-      setStatus("Camera ready. Point it at what you want help with.", "ok");
-
-      // Clear the caption after a moment so it doesn't sit on screen.
-      setTimeout(() => {
-        if (statusEl.textContent.startsWith("Camera ready")) setStatus("");
-      }, 3500);
-    } catch (err) {
-      startBtn.disabled = false;
-      reportCameraError(err);
-    }
-  }
-
-  // Turn raw getUserMedia errors into plain-language, spoken guidance.
-  function reportCameraError(err) {
-    const name = err && err.name ? err.name : "";
-    let msg;
-    switch (name) {
-      case "NotAllowedError":
-      case "SecurityError":
-        msg =
-          "Camera permission was blocked. Allow camera access in your " +
-          "browser settings, then tap Start camera again.";
-        break;
-      case "NotFoundError":
-      case "OverconstrainedError":
-        msg = "No usable camera was found on this device.";
-        break;
-      case "NotReadableError":
-        msg =
-          "The camera is busy in another app. Close it and tap Start " +
-          "camera again.";
-        break;
-      default:
-        msg = "Could not start the camera. Tap Start camera to try again.";
-    }
-    setStatus(msg, "error");
-  }
-
-  // Pause the stream when the tab is hidden; resume when it returns. Saves
-  // battery and avoids the camera staying "on" in the background.
-  document.addEventListener("visibilitychange", () => {
-    if (!stream) return;
-    const on = !document.hidden;
-    stream.getVideoTracks().forEach((t) => (t.enabled = on));
+  recognizer = createRecognizer({
+    onInterim: (t) => { askHeard.textContent = t; askInput.value = t; },
+    onFinal:   (t) => { askHeard.textContent = t; askInput.value = t; },
+    onError:   (m) => { setListening(false); askHeard.textContent = m; speak(m); },
+    onEnd:     () => setListening(false),
   });
+  if (!recognizer) return;
+  setListening(true);
+  recognizer.start();
+}
 
-  // ---- Welcome / onboarding (blind-first) --------------------------------
-  // A blind user needs to hear what to do. Two safety nets:
-  //  1) Screen reader: we focus the big Start button on load, so VoiceOver /
-  //     TalkBack immediately read "Start camera … double-tap anywhere…".
-  //  2) Self-voicing: we also try to speak a welcome ourselves, for users who
-  //     aren't running a screen reader. Mobile browsers block speech before
-  //     the first gesture, so if the load-time attempt is muted we speak it
-  //     on the very first touch instead — well before the camera opens.
-  const WELCOME =
-    "Welcome to Second Sight, a spare pair of eyes. " +
-    "Tap anywhere on the screen to start your camera.";
+function sendAsk() {
+  if (listening) recognizer?.stop();
+  const q = askInput.value.trim();
+  if (!q) { speak("Please say or type a question first."); askInput.focus(); return; }
+  closeOverlay(askOverlay);
+  runTask("ask", q);
+}
 
-  function welcome() {
-    if (welcomed) return;
-    welcomed = true;
-    speak(WELCOME);
+// ---- Settings ------------------------------------------------------------
+function openSettings() {
+  openaiKey.value = keys.openai;
+  exaKey.value = keys.exa;
+  openOverlay(settingsOverlay, openaiKey);
+}
+function saveSettings() {
+  keys.openai = openaiKey.value.trim();
+  keys.exa = exaKey.value.trim();
+  closeOverlay(settingsOverlay);
+  setStatus(keys.openai ? "Settings saved." : "Saved, but no OpenAI key set yet.", "ok");
+}
+
+// ---- Enhance (no network) ------------------------------------------------
+function openEnhance() {
+  openOverlay(enhancePanel, enhanceClose);
+}
+function onZoom() {
+  const z = parseFloat(zoom.value);
+  setZoom(video, z);
+  zoomValue.textContent = z.toFixed(1) + "×";
+}
+function onFilterToggle(btn) {
+  const name = btn.dataset.filter;
+  const on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", String(on));
+  setFilter(video, name, on);
+  speak((on ? "On: " : "Off: ") + btn.textContent.trim());
+}
+function resetEnhancements() {
+  resetEnhance(video);
+  zoom.value = 1; zoomValue.textContent = "1.0×";
+  enhancePanel.querySelectorAll(".toggle").forEach((t) => t.setAttribute("aria-pressed", "false"));
+  speak("Enhancements reset.");
+}
+
+// ---- Welcome / onboarding (blind-first) ---------------------------------
+const WELCOME =
+  "Welcome to Second Sight, a spare pair of eyes. " +
+  "Tap anywhere on the screen to start your camera.";
+
+function welcome() { if (!welcomed) { welcomed = true; speak(WELCOME); } }
+
+function onReady() {
+  try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
+  welcome();
+}
+
+// ---- Wire up -------------------------------------------------------------
+startBtn.addEventListener("click", start);
+window.addEventListener("pointerdown", welcome, { once: true });
+
+// Action bar (event delegation)
+actions.addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  if (btn.dataset.task) return runTask(btn.dataset.task);
+  switch (btn.dataset.open) {
+    case "ask":      return openAsk();
+    case "enhance":  return openEnhance();
+    case "settings": return openSettings();
   }
+});
 
-  function onReady() {
-    // Move focus to the start control so the screen reader announces it.
-    try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
-    // Best-effort spoken welcome (may be blocked until first gesture).
-    welcome();
-  }
+// Result dialog
+replayBtn.addEventListener("click", () => speak(lastResultText));
+resultClose.addEventListener("click", () => { currentAbort?.abort(); stopSpeaking(); closeOverlay(resultOverlay); });
 
-  // If the welcome was blocked pre-gesture, guarantee it on first touch.
-  window.addEventListener("pointerdown", welcome, { once: true });
+// Ask dialog
+micBtn.addEventListener("click", toggleMic);
+askSend.addEventListener("click", sendAsk);
+askCancel.addEventListener("click", () => { if (listening) recognizer?.stop(); closeOverlay(askOverlay); });
 
-  // ---- Wire up -----------------------------------------------------------
-  startBtn.addEventListener("click", startCamera);
+// Settings dialog
+settingsSave.addEventListener("click", saveSettings);
+settingsCancel.addEventListener("click", () => closeOverlay(settingsOverlay));
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", onReady);
-  } else {
-    onReady();
-  }
-})();
+// Enhance panel
+zoom.addEventListener("input", onZoom);
+enhanceReset.addEventListener("click", resetEnhancements);
+enhanceClose.addEventListener("click", () => closeOverlay(enhancePanel));
+enhancePanel.addEventListener("click", (e) => {
+  const t = e.target.closest(".toggle");
+  if (t) onFilterToggle(t);
+});
+
+// Tap the dark backdrop to dismiss any full overlay.
+[resultOverlay, askOverlay, settingsOverlay].forEach((ov) => {
+  ov.addEventListener("click", (e) => {
+    if (e.target !== ov) return;
+    if (ov === resultOverlay) { currentAbort?.abort(); stopSpeaking(); }
+    if (ov === askOverlay && listening) recognizer?.stop();
+    closeOverlay(ov);
+  });
+});
+
+// Escape closes whatever is open.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  [resultOverlay, askOverlay, settingsOverlay, enhancePanel].forEach((ov) => {
+    if (!ov.hidden) {
+      if (ov === resultOverlay) { currentAbort?.abort(); stopSpeaking(); }
+      closeOverlay(ov);
+    }
+  });
+});
+
+bindVisibility();
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", onReady);
+} else {
+  onReady();
+}
