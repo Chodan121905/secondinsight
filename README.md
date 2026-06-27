@@ -147,8 +147,11 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
    / Repeat) as you walk. A map renders for sighted helpers.
 
    Navigation uses **free, no-billing** services: **OpenStreetMap** tiles via
-   Leaflet (no key) for the map, and **OpenRouteService** (server-side, key in
-   env) for search + walking directions.
+   Leaflet (no key) for the map, **Nominatim** (OpenStreetMap, no key) to find
+   the place, and **OpenRouteService** (server-side, key in env) for the
+   foot-walking directions. (ORS's own hosted geocoding rejects many keys with
+   403, so place-search is done via Nominatim and the ORS key is used only for
+   routing.)
 
 6. **👣 Walking awareness (always on, proactive):** the detector runs
    automatically as part of hands-free mode and, because the user can't see the

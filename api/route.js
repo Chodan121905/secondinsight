@@ -20,21 +20,31 @@ module.exports = async (req, res) => {
   if (!query) return res.status(400).json({ error: "Missing a destination." });
 
   try {
-    // 1) Geocode the destination, biased to the user's location.
+    // 1) Geocode the destination with OpenStreetMap Nominatim — free, no key,
+    //    and reliable (ORS's hosted geocoding rejects many keys with 403). We
+    //    bias results to a box around the user so "orchard" prefers the one
+    //    near them. Nominatim requires a descriptive User-Agent.
+    const d = 0.7; // ~bias box (degrees) around the user
+    const viewbox = `${origin.lng - d},${origin.lat + d},${origin.lng + d},${origin.lat - d}`;
     const gUrl =
-      `${ORS}/geocode/search?api_key=${encodeURIComponent(key)}` +
-      `&text=${encodeURIComponent(query)}&size=1` +
-      `&focus.point.lon=${origin.lng}&focus.point.lat=${origin.lat}`;
-    const gRes = await fetch(gUrl);
-    if (!gRes.ok) return res.status(502).json({ error: await orsMessage(gRes, "search") });
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=0` +
+      `&q=${encodeURIComponent(query)}` +
+      `&viewbox=${encodeURIComponent(viewbox)}&bounded=0`;
+    const gRes = await fetch(gUrl, {
+      headers: {
+        "User-Agent": "SecondSight/1.0 (assistive navigation for low-vision users)",
+        "Accept-Language": "en",
+      },
+    });
+    if (!gRes.ok) return res.status(502).json({ error: "Place search failed. Try again in a moment." });
     const gData = await gRes.json();
-    const f = gData.features && gData.features[0];
-    if (!f) return res.status(404).json({ error: "I couldn't find that place. Try saying it differently." });
+    const place = Array.isArray(gData) && gData[0];
+    if (!place) return res.status(404).json({ error: "I couldn't find that place. Try saying it differently." });
     const dest = {
-      name: f.properties.name || f.properties.label || query,
-      label: f.properties.label || "",
-      lon: f.geometry.coordinates[0],
-      lat: f.geometry.coordinates[1],
+      name: (place.name || (place.display_name || query).split(",")[0]).trim(),
+      label: place.display_name || "",
+      lon: parseFloat(place.lon),
+      lat: parseFloat(place.lat),
     };
 
     // 2) Walking route.
