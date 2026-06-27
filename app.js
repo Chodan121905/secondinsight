@@ -31,7 +31,7 @@ const tapCapture = $("tapCapture");
 const overlayCanvas = $("overlay");
 const statusEl   = $("status");
 const actions    = $("actions");
-const aroundBtn  = $("aroundBtn");
+const pauseBtn   = $("pauseBtn");
 
 const resultOverlay = $("resultOverlay");
 const resultTitle   = $("resultTitle");
@@ -171,12 +171,9 @@ async function start() {
     tapCapture.hidden = false;
     actions.hidden = false;
     earcon("success");
-    setStatus(
-      "Camera ready. Just tap the camera and I'll tell you what's in front of you. " +
-      "Or slide your finger over the screen to hear each button, then lift to choose.",
-      "ok"
-    );
-    setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 6500);
+    // Go fully hands-free immediately — no button needed. The on-screen
+    // controls stay available for sighted helpers / low-vision users.
+    startAuto();
     actions.querySelector(".action--primary")?.focus();
   } catch (err) {
     startBtn.disabled = false;
@@ -203,7 +200,6 @@ function reportCameraError(err) {
 
 // ---- The capture → model → speak loop -----------------------------------
 async function runTask(task, question) {
-  if (aroundOn) stopAround();
   if (!backendHas("vision")) { featureUnavailable("vision"); return; }
   const cfg = TASKS[task] || TASKS.describe;
 
@@ -281,7 +277,6 @@ async function enrich(labelText) {
 // ---- Ask dialog ----------------------------------------------------------
 const askVoice = makeVoiceControl({ btn: micBtn, label: micLabel, heard: askHeard, input: askInput });
 function openAsk() {
-  if (aroundOn) stopAround();
   askHeard.textContent = "";
   askInput.value = "";
   openOverlay(askOverlay, voiceInputSupported ? micBtn : askInput);
@@ -304,7 +299,6 @@ let stepIdx = 0;
 let destName = "";
 
 function openNavigate() {
-  if (aroundOn) stopAround();
   if (!backendHas("maps")) { featureUnavailable("maps"); return; }
   navHeard.textContent = "";
   navInput.value = "";
@@ -314,11 +308,17 @@ function openNavigate() {
     : "Where do you want to go? Type a destination, then choose Get directions.");
 }
 
-async function goNavigate() {
+function goNavigate() {
   navVoice.stop();
   const dest = navInput.value.trim();
   if (!dest) { speak("Please say or type where you want to go."); navInput.focus(); return; }
   closeOverlay(navOverlay);
+  navigateTo(dest);
+}
+
+// The actual routing, reused by both the dialog and a spoken "navigate to X".
+async function navigateTo(dest) {
+  if (!backendHas("maps")) { featureUnavailable("maps"); return; }
 
   // Open the route sheet in a thinking state.
   routeSteps = []; stepIdx = 0;
@@ -405,84 +405,262 @@ function showRouteError(message) {
   speak(message);
 }
 
-// ---- Around me (real-time object awareness while walking) ----------------
-// Continuous on-device detection loop that calls out nearby people/vehicles/
-// objects with rough position and proximity. Hands-free; toggled on/off.
-let aroundOn = false;
-let aroundModel = null;
-let aroundTimer = null;
-let lastUrgent = 0;
-const lastAnnounce = new Map();
+// ---- Hands-free Auto mode (no buttons needed) ---------------------------
+// A blind user can't see buttons, so after the ONE start tap (browsers force a
+// gesture before camera + audio can begin) the app runs itself: it watches
+// continuously, warns about hazards on-device, narrates the scene through the
+// AI, and — where the browser supports it — takes spoken commands. The visible
+// buttons become optional, for a sighted helper or a low-vision user who
+// prefers tapping.
+let autoOn = false;            // engine running
+let narrationPaused = false;   // user said "stop / quiet"
+let detector = null;
+let detectTimer = null;
+let narrateTimer = null;
+let lastUrgentAt = 0;
+let lastDets = [];             // most recent detections (for "what's around me")
+let lastNarration = "";
 
-async function toggleAround() {
-  if (aroundOn) return stopAround();
-  setStatus("Loading object detection…", "active");
-  speak("Loading object detection.");
-  try {
-    aroundModel = await loadDetector();
-  } catch (err) {
-    return setStatus(err.message || "Couldn't start object detection.", "error");
-  }
-  aroundOn = true;
-  aroundBtn.setAttribute("aria-pressed", "true");
+const isSpeaking = () => !!(window.speechSynthesis && window.speechSynthesis.speaking);
+
+function startAuto() {
+  if (autoOn) return;
+  autoOn = true;
+  narrationPaused = false;
   overlayCanvas.hidden = false;
-  lastAnnounce.clear();
-  lastUrgent = 0;
-  earcon("listen");
-  vibrate(40);
-  setStatus("Around me is on. I'll call out what's nearby. Choose Around me again to stop.", "active");
-  speak("Around me is on. I'll tell you what's nearby.");
-  tickAround();
+  lastNarration = "";
+  setStatus("Watching. I'll tell you what's around you — no buttons needed.", "active");
+
+  let intro = "I'm watching now. I'll tell you what's around you, and you don't " +
+              "need to press anything.";
+  if (!backendUp())
+    intro += " The AI server isn't connected, so right now I can only warn you " +
+             "about nearby objects.";
+  if (voiceInputSupported)
+    intro += " You can also talk to me — say 'help' to hear what you can ask.";
+  speak(intro);
+
+  // On-device hazard detection (optional; AI narration still runs without it).
+  loadDetector()
+    .then((m) => { detector = m; detectLoop(); })
+    .catch(() => { /* detection unavailable; narration still works */ });
+  narrateLoop(true);  // first AI narration shortly after start
+  startVoice();       // spoken commands where the browser supports them
 }
 
-async function tickAround() {
-  if (!aroundOn) return;
+// Pause the whole hands-free engine while the tab/app is backgrounded — no
+// point burning API calls or warning an empty room — and resume on return.
+function suspendAuto() {
+  if (detectTimer)  { clearTimeout(detectTimer);  detectTimer = null; }
+  if (narrateTimer) { clearTimeout(narrateTimer); narrateTimer = null; }
+  stopVoice();
+  stopSpeaking();
+}
+function resumeAuto() {
+  if (detector) detectLoop();
+  if (!narrationPaused) narrateLoop(true);
+  startVoice();
+}
+
+function setPaused(p) {
+  narrationPaused = p;
+  pauseBtn.setAttribute("aria-pressed", String(p));
+  const t = pauseBtn.querySelector(".action__text");
+  if (t) t.textContent = p ? "Resume" : "Pause";
+  if (p) {
+    stopSpeaking(); earcon("stoplisten");
+    setStatus("Paused. Say 'start', or choose Resume.", "ok");
+    speak("Paused.");
+  } else {
+    earcon("listen");
+    setStatus("Back on. I'll keep describing what I see.", "active");
+    speak("Okay, back on.");
+    narrateLoop(true);
+  }
+}
+function togglePause() {
+  if (!autoOn) return startAuto();
+  setPaused(!narrationPaused);
+}
+
+// --- On-device hazard loop (fast, no network) ---
+async function detectLoop() {
+  if (!autoOn || !detector) return;
   try {
-    const dets = await detectFrame(aroundModel, video);
+    const dets = await detectFrame(detector, video);
+    lastDets = dets;
     drawBoxes(overlayCanvas, video, dets, 0.5);
-    announceAround(describeDetections(dets, video.videoWidth, video.videoHeight, 0.5));
+    if (!narrationPaused && !anyModalOpen())
+      handleHazards(describeDetections(dets, video.videoWidth, video.videoHeight, 0.5));
   } catch (_) { /* skip a bad frame */ }
-  if (aroundOn) aroundTimer = setTimeout(tickAround, 550);
+  if (autoOn) detectTimer = setTimeout(detectLoop, 650);
 }
 
-function announceAround(items) {
-  if (!items.length) return; // silence = nothing notable nearby
+function handleHazards(items) {
+  if (!items.length) return;
   const now = Date.now();
   const top = items[0];
-
-  // Urgent hazard very close: interrupt with haptic + alert tone.
-  if (top.urgent && now - lastUrgent > 2200) {
-    lastUrgent = now;
-    lastAnnounce.set(top.key, now);
+  // Imminent hazard: interrupt everything with haptic + alert tone. Calm,
+  // non-urgent objects are left to the scene narration / "what's around me"
+  // so we don't bury the user in a constant stream.
+  if (top.urgent && now - lastUrgentAt > 2200) {
+    lastUrgentAt = now;
     setStatus(phraseFor(top), "active");
     vibrate([80, 40, 80]);
     earcon("error");
     speak(phraseFor(top), { interrupt: true });
-    return;
-  }
-  // Otherwise speak one fresh item, only when not already talking (calm pace).
-  if (window.speechSynthesis && window.speechSynthesis.speaking) return;
-  for (const it of items.slice(0, 3)) {
-    if (now - (lastAnnounce.get(it.key) || 0) > 4500) {
-      lastAnnounce.set(it.key, now);
-      setStatus(phraseFor(it), "active");
-      speak(phraseFor(it), { interrupt: false });
-      return;
-    }
   }
 }
 
-function stopAround() {
-  aroundOn = false;
-  if (aroundTimer) { clearTimeout(aroundTimer); aroundTimer = null; }
-  aroundBtn.setAttribute("aria-pressed", "false");
+// --- AI narration loop (periodic, server) ---
+function narrateLoop(soon) {
+  if (narrateTimer) { clearTimeout(narrateTimer); narrateTimer = null; }
+  if (!autoOn) return;
+  narrateTimer = setTimeout(async () => {
+    if (autoOn && !narrationPaused) await narrateOnce();
+    if (autoOn) narrateLoop(false);
+  }, soon ? 1400 : 9000);
+}
+
+async function narrateOnce(force = false) {
+  if (!backendHas("vision")) { if (force) speak("The AI server isn't connected, so I can only warn you about nearby objects."); return; }
+  if (!force && (isSpeaking() || anyModalOpen())) return; // don't talk over self/dialogs
+  if (!force && Date.now() - lastUrgentAt < 2500) return; // just gave a hazard warning
+  let img;
+  try { img = captureFrame(video, 1024); } catch (_) { return; }
+  if (force) { earcon("capture"); vibrate(20); speak("Looking…"); }
   try {
-    const ctx = overlayCanvas.getContext("2d");
-    ctx && ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-  } catch (_) {}
-  overlayCanvas.hidden = true;
-  earcon("stoplisten");
-  setStatus("Around me is off.", "ok");
+    const text = await visionViaServer({ task: "auto", imageDataUrl: img });
+    if (!text || !autoOn) return;
+    if (!force && narrationPaused) return;
+    if (!force && (isSpeaking() || anyModalOpen())) return;
+    if (!force && sameScene(text, lastNarration)) return;  // don't repeat the same thing
+    lastNarration = text;
+    lastResultText = text;
+    setStatus(text, "");
+    speak(text, { interrupt: false });
+  } catch (_) { /* skip; the next tick tries again */ }
+}
+
+// Cheap "is this basically what I just said?" guard to avoid repetition.
+function sameScene(a, b) {
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  return !!b && norm(a).slice(0, 80) === norm(b).slice(0, 80);
+}
+
+// Spoken-only version of a focused task (no modal to trap a blind user).
+async function speakTask(task, question) {
+  if (!backendHas("vision")) { speak("That needs the AI server, which isn't connected."); return; }
+  let img;
+  try { img = captureFrame(video, (TASKS[task] && TASKS[task].maxDim) || 1280); }
+  catch (_) { speak("I couldn't use the camera just now. Try again."); return; }
+  earcon("capture"); vibrate(20);
+  speak(taskTitle(task) + "…");
+  try {
+    const text = await visionViaServer({ task, question, imageDataUrl: img });
+    if (!text) { speak("I didn't get an answer. Try again."); return; }
+    lastResultText = text;
+    setStatus(text, "");
+    earcon("success");
+    speak(text, { interrupt: false });
+  } catch (err) {
+    earcon("error");
+    speak(err.message || "Sorry, that didn't work. Try again.");
+  }
+}
+
+function announceSurroundings() {
+  const items = describeDetections(lastDets, video.videoWidth, video.videoHeight, 0.5);
+  if (!items.length) { speak("I don't see anything notable around you right now."); return; }
+  speak("Around you: " + items.slice(0, 3).map(phraseFor).join(", ") + ".");
+}
+
+// --- Hands-free voice commands (continuous, where supported) ---
+// SpeechRecognition stops after each phrase, so we restart it on end to make
+// it feel always-on. We hold off while we're speaking to avoid the mic hearing
+// our own voice. Absent on most iOS Safari — there the app still narrates
+// automatically and a helper can use the on-screen buttons.
+let voiceRec = null;
+let voiceActive = false;
+
+function startVoice() {
+  if (!voiceInputSupported || voiceActive) return;
+  voiceActive = true;
+  listenChunk();
+}
+function stopVoice() {
+  voiceActive = false;
+  if (voiceRec) { try { voiceRec.stop(); } catch (_) {} voiceRec = null; }
+}
+function listenChunk() {
+  if (!voiceActive || !autoOn) return;
+  // Wait out our own TTS, and stand down while the Ask/Navigate dialogs are
+  // open (they run their own recognizer — two at once conflict).
+  if (isSpeaking() || !askOverlay.hidden || !navOverlay.hidden) { setTimeout(listenChunk, 700); return; }
+  voiceRec = createRecognizer({
+    onFinal: (t) => handleCommand(t),
+    onError: (m) => {
+      // A blocked mic would otherwise restart in a tight loop — stop voice and
+      // carry on narrating. Transient errors (no-speech) just fall through to
+      // onEnd, which restarts listening.
+      if (/permission|microphone|no microphone/i.test(m)) {
+        voiceActive = false;
+        speak("I can't hear you without microphone access, but I'll keep " +
+              "describing what I see.", { interrupt: false });
+      }
+    },
+    onEnd:   () => { if (voiceActive && autoOn) setTimeout(listenChunk, 350); },
+  });
+  if (voiceRec) voiceRec.start();
+}
+
+const said = (t, ...words) => words.some((w) => t.includes(w));
+function handleCommand(raw) {
+  const t = (raw || "").toLowerCase().trim();
+  if (!t) return;
+  setStatus("Heard: " + t, "");
+
+  // If a walking route is open, spoken words drive the step-by-step.
+  if (!routeOverlay.hidden) {
+    if (said(t, "next", "forward"))   return nextStep();
+    if (said(t, "back", "previous"))  return showStep(stepIdx - 1);
+    if (said(t, "repeat", "again"))   return routeSteps.length && showStep(stepIdx);
+    if (said(t, "done", "close", "cancel", "exit", "finish")) {
+      stopSpeaking(); closeOverlay(routeOverlay); return;
+    }
+  }
+
+  // "navigate to / take me to / go to / directions to / where is X"
+  const nav = t.match(/(?:navigate to|take me to|go to|directions to|walk to|where is|find me)\s+(.+)/);
+  if (nav && nav[1]) return navigateTo(nav[1].trim());
+
+  if (said(t, "help", "what can i say", "what can you do", "commands")) return sayHelp();
+  if (said(t, "stop", "quiet", "silence", "shut up", "pause", "hush"))  return setPaused(true);
+  if (said(t, "start", "resume", "continue", "carry on", "go on", "wake up"))
+    return narrationPaused ? setPaused(false) : narrateLoop(true);
+  if (said(t, "around", "near me", "nearby", "surroundings"))           return announceSurroundings();
+  if (said(t, "medicine", "medication", "pill", "tablet", "prescription")) return speakTask("medicine");
+  if (said(t, "translate", "translation"))                             return speakTask("translate");
+  if (said(t, "read"))                                                 return speakTask("read");
+  if (said(t, "torch", "flashlight", "light", "brighter", "too dark")) return toggleTorch();
+  if (said(t, "repeat", "again", "say that again", "replay"))
+    return speak(lastResultText || lastNarration || "There's nothing to repeat yet.");
+  if (said(t, "describe", "look", "what's this", "what is this", "what do you see",
+           "in front", "what's that", "what am i looking at"))
+    return narrateOnce(true);
+
+  // Anything else: treat it as a question about what the camera sees.
+  speakTask("ask", raw);
+}
+
+function sayHelp() {
+  speak(
+    "You don't have to press anything. I describe what I see on my own. " +
+    "You can also say: describe, to hear what's in front of you. Read, to read text. " +
+    "Medicine, for a medicine label. Translate, for a sign in another language. " +
+    "Around me, for nearby people and objects. Navigate to a place, for walking " +
+    "directions. Or just ask a question. Say stop to quiet me, and start to resume."
+  );
 }
 
 // ---- Family location sharing --------------------------------------------
@@ -513,7 +691,6 @@ function onLocation(p) {
 // ---- Settings ------------------------------------------------------------
 let speechRatePref = "1";
 function openSettings() {
-  if (aroundOn) stopAround();
   serverNote.hidden = !backendUp();
   noServerNote.hidden = backendUp();
   speechRate.value = speechRatePref;
@@ -535,7 +712,6 @@ function saveSettings() {
 
 // ---- Enhance (no network) ------------------------------------------------
 function openEnhance() {
-  if (aroundOn) stopAround();
   // Only offer the flashlight where the camera hardware actually supports it.
   if (supportsTorch()) {
     torchBtn.hidden = false;
@@ -577,11 +753,10 @@ function resetEnhancements() {
 // ---- Welcome / onboarding (blind-first) ---------------------------------
 const WELCOME =
   "Welcome to Second Sight, a spare pair of eyes. " +
-  "Tap anywhere on the screen to start your camera. " +
-  "After that, just tap the screen again and I'll tell you what's in front of " +
-  "you — you don't have to pick anything. " +
-  "Tip: you can also slide your finger around the screen to hear each button, " +
-  "and lift your finger to choose it.";
+  "Tap anywhere on the screen once to start. " +
+  "After that you don't have to press anything — I'll watch and tell you what's " +
+  "around you on my own, and warn you about anything close. " +
+  "You can also just talk to me; say 'help' any time to hear what you can ask.";
 function welcome() { if (!welcomed) { welcomed = true; ensureAudio(); speak(WELCOME); } }
 function onReady() {
   try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
@@ -598,7 +773,7 @@ actions.addEventListener("click", (e) => {
   if (!btn) return;
   if (btn.dataset.task) return runTask(btn.dataset.task);
   switch (btn.dataset.open) {
-    case "around":   return toggleAround();
+    case "pause":    return togglePause();
     case "ask":      return openAsk();
     case "navigate": return openNavigate();
     case "enhance":  return openEnhance();
@@ -626,9 +801,9 @@ routePrev.addEventListener("click", () => showStep(stepIdx - 1));
 routeRepeat.addEventListener("click", () => routeSteps.length && showStep(stepIdx));
 routeClose.addEventListener("click", () => { stopSpeaking(); closeOverlay(routeOverlay); });
 
-// Tap the camera itself = the default "Look" (auto-detect): biggest, easiest
-// non-visual target, and the user never has to choose what kind of thing it is.
-tapCapture.addEventListener("click", () => { if (!anyModalOpen() && !aroundOn) runTask("auto"); });
+// The app narrates on its own, but tapping the camera forces an immediate
+// "Look" — handy if the user wants an answer right now without waiting.
+tapCapture.addEventListener("click", () => { if (!anyModalOpen()) { stopSpeaking(); narrateOnce(true); } });
 
 // Settings dialog
 settingsSave.addEventListener("click", saveSettings);
@@ -671,6 +846,12 @@ document.addEventListener("keydown", (e) => {
 });
 
 bindVisibility();
+// Suspend/resume the hands-free engine with the tab so it doesn't run (or pay
+// for vision calls) while the app is in the background.
+document.addEventListener("visibilitychange", () => {
+  if (!autoOn) return;
+  if (document.hidden) suspendAuto(); else resumeAuto();
+});
 enableExploreByTouch({ speak, vibrate }); // eyes-free: slide to hear, lift to choose
 initBackend(); // discover the server (keys in env); on-device features work without it
 

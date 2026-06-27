@@ -13,25 +13,46 @@ spoken questions on request.
 > demonstrates the principles: Atkinson Hyperlegible type, high-contrast dark
 > theme, huge tap targets, and voice-first interaction.
 
-## Auto-detect first — no mode to pick
+## Hands-free by default — no buttons to find
 
-The core insight: **a blind user can't sensibly choose "Read text" vs "Medicine
-label" vs "Translate sign"**, because they can't see which one applies. So the
-default isn't a menu — it's a single **Look** (and tapping the camera does the
-same). One capture goes to the model with an *agent* prompt that decides what's
-in front of the user and responds appropriately:
+The core insight: **a blind user can't see buttons, so they can't pick one.**
+A menu of "Read text" / "Medicine label" / "Translate sign" assumes the sight
+they don't have — twice over: they can't see the buttons, and they couldn't
+know which applies even if they could. So the app doesn't ask them to choose
+*or* to press.
 
-- warns about a hazard first if there is one,
-- says what it's looking at,
-- reads any text — or, if it's a **medicine label**, gives a structured
-  Name / Strength / Form / Directions / Warnings read with a "confirm with your
-  pharmacist" disclaimer,
-- **translates** a non-English sign,
-- otherwise **describes the scene**.
+After the **one** tap browsers force on us (a user gesture is required before a
+page may open the camera or play audio — the whole screen is that target, and
+it self-voices), the app **runs itself**:
 
-The old per-task buttons (Read text, Medicine, Translate, Ask) still exist as
-**optional** shortcuts for when the user *does* know what they want — but nobody
-has to pick one to get a useful answer.
+- **Watches continuously and narrates** — every few seconds it sends a frame to
+  the model with an *agent* prompt that decides what matters and says it:
+  warns about a hazard first, says what it's looking at, reads any text (a
+  **medicine label** becomes a structured Name / Strength / Form / Directions /
+  Warnings read with a "confirm with your pharmacist" disclaimer), **translates**
+  a non-English sign, or **describes the scene**. It skips repeats so it isn't
+  chatty.
+- **Warns about hazards in real time, on-device** — a continuous coco-ssd loop
+  calls out anything close ("Car on your left, very close") instantly, with no
+  network, even before the AI narration speaks.
+- **Takes spoken commands** (where the browser supports speech input) — say
+  *"read this"*, *"medicine"*, *"translate"*, *"what's around me"*, *"navigate
+  to the nearest pharmacy"*, *"stop"* / *"start"*, or just ask a question. Say
+  *"help"* to hear the list. No button required for any of it.
+
+The on-screen buttons still work, but they're now **optional** — for a sighted
+helper, a low-vision user who prefers tapping, or a browser without voice input.
+
+> **The one unavoidable tap.** Every browser blocks `getUserMedia` and audio
+> until the user interacts once; there is no way around it on the web. We make
+> that single gesture the entire screen, announce it on load, and never require
+> another tap after it. (A headless IoT build with a hardware power button has
+> no gesture requirement at all.)
+>
+> **Voice input caveat.** `SpeechRecognition` is missing on most iOS Safari
+> builds, so spoken commands won't work there — but automatic narration and
+> hazard warnings still do, and a VoiceOver user navigates the optional buttons
+> the way they navigate any app.
 
 ## Two engines
 
@@ -95,19 +116,24 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
 
 ## Using it
 
-1. Tap anywhere to start the camera.
-2. **Enhance** (the 🔆 button) works immediately with **no key, no server** —
+1. **Tap anywhere once** to start. That's the only required tap. From then on
+   the app is hands-free: it warns about anything close, describes what's in
+   front of you on its own, and listens for spoken commands.
+2. **Just listen** — point the phone where you're facing and the app keeps
+   telling you what's around. **Tap the camera** any time to force an immediate
+   "Look", or **speak**: *"read this"*, *"medicine"*, *"translate"*, *"what's
+   around me"*, *"navigate to the nearest pharmacy"*, *"stop"* / *"start"*, or
+   ask any question. Say *"help"* for the list.
+3. **Enhance** (the 🔆 button) works immediately with **no key, no server** —
    zoom + contrast / brighter / black-and-white / invert + torch. The
    offline-safe fallback.
-3. The AI features need the **deployed backend** (keys in env). No keys are ever
-   entered in the app — if the backend is missing, those buttons say so.
-4. Point the camera and just tap the screen (or **Look — tell me what's here**).
-   The AI decides what's in front of you and reads it aloud — scene, text,
-   medicine label, or translation — no mode to choose. The focused buttons
-   (**Read text**, **Medicine label**, **Translate sign**, **Ask a question**)
-   are there only if you *want* a specific answer. Results are shown as large
-   captions; tap **🔊 Replay** to hear one again.
-5. **🧭 Navigate somewhere:** say or type a destination ("nearest pharmacy",
+4. The AI narration + spoken Q&A need the **deployed backend** (keys in env).
+   No keys are ever entered in the app; without the backend the app still warns
+   about nearby objects on-device. The on-screen buttons (**Read text**,
+   **Medicine label**, **Translate sign**, **Ask a question**) are optional
+   shortcuts for a sighted helper or anyone who prefers tapping.
+5. **🧭 Navigate somewhere:** say *"navigate to …"* or type a destination
+   ("nearest pharmacy",
    an address, a place name). The app finds your location and speaks the best
    **walking route**, then lets you step through each instruction (Next / Back
    / Repeat) as you walk. A map renders for sighted helpers.
@@ -116,11 +142,13 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
    Leaflet (no key) for the map, and **OpenRouteService** (server-side, key in
    env) for search + walking directions.
 
-6. **👣 Around me (walking awareness):** a hands-free, real-time loop that calls
-   out nearby people, vehicles, and objects with rough position and proximity —
-   "Person ahead, close", "Car on your left", "Bicycle on your right" — with an
-   urgent tone + haptic when a hazard is very close. Toggle it on and walk;
-   toggle off to stop. Live detection boxes render for sighted helpers.
+6. **👣 Walking awareness (always on):** the hazard loop runs automatically as
+   part of hands-free mode — it calls out anything close with rough position and
+   proximity ("Car on your left, very close") with an urgent tone + haptic, and
+   you can ask *"what's around me"* any time for a roundup of nearby people,
+   vehicles, and objects. **Pause** (button or say *"stop"*) quiets everything;
+   **Resume** (or *"start"*) brings it back. Live detection boxes render for
+   sighted helpers.
 
    Runs on-device with **coco-ssd (MobileNet-SSD)** via TensorFlow.js — a
    **YOLO-style** object detector that needs **no API key, no cost**, and keeps
@@ -145,13 +173,13 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
 
 The app runs in **two modes from one codebase**:
 
-- **Static mode** (`*.js` ES modules, no build): the browser calls OpenAI / Exa
-  / OpenRouteService directly with keys the user pastes (memory only). Great as
-  a zero-infra demo and an on-stage fallback.
+- **Static mode** (`*.js` ES modules, no build, e.g. GitHub Pages): no server,
+  **no keys anywhere**, so only the on-device features run — hazard detection
+  (coco-ssd) and Enhance. A zero-infra, on-stage fallback.
 - **Backend mode** (`/api/*` serverless functions on Vercel): keys live in
   **env vars**, the browser only talks to our own endpoints, and the server
   stores location for family sharing. The front-end auto-detects this via
-  `/api/health`.
+  `/api/health` and lights up the AI narration + spoken Q&A.
 
 Backend mode is the bridge to the **headless future you described — "just a
 camera, no front-end."** Because the API already accepts a frame and returns
@@ -171,10 +199,13 @@ whether the client is a phone today or a wearable cam tomorrow.
 
 ### Accessibility model
 
-- **Self-voicing:** the app speaks to you (welcome, chosen action, results,
+- **Hands-free first:** after one start tap the app drives itself — continuous
+  hazard warnings, automatic scene narration, and spoken commands — so the
+  primary experience needs **no buttons at all**.
+- **Self-voicing:** the app speaks to you (welcome, what it sees, warnings,
   errors) even with no screen reader running.
-- **Screen-reader-native:** every control is a labelled button; focus is
-  managed so VoiceOver / TalkBack announce the right thing.
+- **Screen-reader-native:** every (optional) control is a labelled button;
+  focus is managed so VoiceOver / TalkBack announce the right thing.
 - **Large-print visual:** Atkinson Hyperlegible, high-contrast dark theme,
   ≥72px tap targets, amber=action / cyan=listening, visible focus rings,
   reduced-motion respected.

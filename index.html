@@ -74,36 +74,29 @@
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </main>
 
-  <!-- Action bar: every action is a big, clearly labelled button. Hidden
-       until the camera is live. -->
+  <!-- Action bar. Once started the app is HANDS-FREE: it narrates on its own
+       and takes spoken commands, so a blind user never needs these. They stay
+       for a sighted helper, a low-vision user who prefers tapping, or a browser
+       without voice input. Hidden until the camera is live. -->
   <nav id="actions" class="actions" aria-label="What can I help with?" hidden>
-    <!-- THE default. The user can't see what's in front of them, so they
-         can't sensibly pick "Read text" vs "Medicine" vs "Translate". This one
-         button captures a frame and lets the AI decide what matters and say
-         it — reading text, handling a medicine label, translating a sign, or
-         describing the scene, automatically. Tapping the camera does the same. -->
+    <!-- Force an immediate "Look" right now (the app also does this on its own,
+         and tapping the camera does the same). The AI decides what matters —
+         scene, text, medicine label, or translation — so nothing to pick. -->
     <button class="action action--primary" type="button" data-task="auto">
       <span class="action__icon" aria-hidden="true">👁️</span>
-      <span class="action__text">Look — tell me what's here</span>
+      <span class="action__text">Look now — tell me what's here</span>
     </button>
 
-    <p class="group-label" id="grpMove">On the move</p>
-    <div class="action-grid" aria-describedby="grpMove">
-      <button id="aroundBtn" class="action action--nav" type="button" data-open="around" aria-pressed="false">
-        <span class="action__icon" aria-hidden="true">👣</span>
-        <span class="action__text">Around me</span>
+    <p class="group-label" id="grpOpt">Hands-free is on — these are optional</p>
+    <div class="action-grid" aria-describedby="grpOpt">
+      <button id="pauseBtn" class="action action--nav" type="button" data-open="pause" aria-pressed="false">
+        <span class="action__icon" aria-hidden="true">⏸️</span>
+        <span class="action__text">Pause</span>
       </button>
       <button class="action action--nav" type="button" data-open="navigate">
         <span class="action__icon" aria-hidden="true">🧭</span>
         <span class="action__text">Navigate</span>
       </button>
-    </div>
-
-    <!-- Optional shortcuts for when the user DOES know they want a focused,
-         structured answer. The default "Look" already covers all of these
-         automatically, so a blind user never has to pick one. -->
-    <p class="group-label" id="grpSpecific">Ask for something specific (optional)</p>
-    <div class="action-grid" aria-describedby="grpSpecific">
       <button class="action" type="button" data-open="ask">
         <span class="action__icon" aria-hidden="true">❓</span>
         <span class="action__text">Ask a question</span>
@@ -120,10 +113,6 @@
         <span class="action__icon" aria-hidden="true">🌐</span>
         <span class="action__text">Translate sign</span>
       </button>
-    </div>
-
-    <p class="group-label" id="grpUtil">Tools</p>
-    <div class="action-grid" aria-describedby="grpUtil">
       <button class="action" type="button" data-open="enhance">
         <span class="action__icon" aria-hidden="true">🔆</span>
         <span class="action__text">Enhance</span>
