@@ -62,9 +62,13 @@ access (except on `localhost`).
 5. **🧭 Navigate somewhere:** say or type a destination ("nearest pharmacy",
    an address, a place name). The app finds your location and speaks the best
    **walking route**, then lets you step through each instruction (Next / Back
-   / Repeat) as you walk. A map renders for sighted helpers. Requires a
-   **Google Maps key** in Settings (enable *Maps JavaScript API* + *Places
-   API*); needs location permission.
+   / Repeat) as you walk. A map renders for sighted helpers.
+
+   Navigation uses **free, no-billing** services: **OpenStreetMap** tiles via
+   Leaflet (no key) for the map, and **OpenRouteService** for search + walking
+   directions. Get a free ORS key (no credit card) at
+   <https://openrouteservice.org/dev/#/signup>, paste it into **Settings**, and
+   allow location permission.
 
 > **Camera is a prototype input.** `camera.js` is the only module bound to the
 > video source, so the phone camera can later be swapped for an IoT / remote

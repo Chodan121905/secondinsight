@@ -14,11 +14,11 @@ import { startCamera, captureFrame, bindVisibility, isSecure,
 import { analyzeImage, exaEnrich, TASKS, taskTitle } from "./vision.js";
 import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
          earcon, ensureAudio, setSpeechRate } from "./speech.js";
-import { loadMapsApi, getCurrentPosition, getMap,
+import { loadMap, getCurrentPosition, getMap,
          planWalkingRoute, renderRoute } from "./maps.js";
 
 // ---- In-memory session keys (never persisted) ---------------------------
-const keys = { openai: "", exa: "", google: "" };
+const keys = { openai: "", exa: "", ors: "" };
 
 // ---- Element handles -----------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -67,7 +67,7 @@ const routeClose       = $("routeClose");
 const settingsOverlay = $("settingsOverlay");
 const openaiKey   = $("openaiKey");
 const exaKey      = $("exaKey");
-const googleKey   = $("googleKey");
+const orsKey      = $("orsKey");
 const speechRate  = $("speechRate");
 const settingsSave   = $("settingsSave");
 const settingsCancel = $("settingsCancel");
@@ -108,7 +108,7 @@ function closeOverlay(overlay) {
 }
 
 function needKey(which) {
-  const names = { openai: "OpenAI", google: "Google Maps" };
+  const names = { openai: "OpenAI", ors: "free OpenRouteService" };
   setStatus(`Add your ${names[which]} key in Settings to use this.`, "error");
   openSettings();
 }
@@ -284,7 +284,7 @@ let stepIdx = 0;
 let destName = "";
 
 function openNavigate() {
-  if (!keys.google) { needKey("google"); return; }
+  if (!keys.ors) { needKey("ors"); return; }
   navHeard.textContent = "";
   navInput.value = "";
   openOverlay(navOverlay, voiceInputSupported ? navMic : navInput);
@@ -306,14 +306,14 @@ async function goNavigate() {
   speak("Finding the best walking route to " + dest + ".");
 
   try {
-    const google = await loadMapsApi(keys.google);
+    const L = await loadMap(); // map needs no key
     setRouteThinking("Getting your location…");
     const origin = await getCurrentPosition();
     setRouteThinking("Finding the best walking route…");
-    const mapObj = getMap(google, mapEl, origin);
+    const mapObj = getMap(L, mapEl, origin);
     mapEl.hidden = false;
-    const route = await planWalkingRoute(google, origin, dest);
-    renderRoute(route.dirs);
+    const route = await planWalkingRoute(keys.ors, origin, dest);
+    renderRoute(L, mapObj, route.coords, origin, route.dest);
     showRoute(route);
   } catch (err) {
     showRouteError(err.message || "Couldn't get directions. Try again.");
@@ -386,14 +386,14 @@ let speechRatePref = "1";
 function openSettings() {
   openaiKey.value = keys.openai;
   exaKey.value = keys.exa;
-  googleKey.value = keys.google;
+  orsKey.value = keys.ors;
   speechRate.value = speechRatePref;
   openOverlay(settingsOverlay, openaiKey);
 }
 function saveSettings() {
   keys.openai = openaiKey.value.trim();
   keys.exa = exaKey.value.trim();
-  keys.google = googleKey.value.trim();
+  keys.ors = orsKey.value.trim();
   speechRatePref = speechRate.value;
   setSpeechRate(speechRatePref);
   closeOverlay(settingsOverlay);

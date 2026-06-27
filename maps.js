@@ -1,45 +1,46 @@
 /* =========================================================================
-   maps.js — Google Maps for blind-first WALKING navigation.
+   maps.js — blind-first WALKING navigation on FREE, no-billing services:
+     • Map tiles:   OpenStreetMap via Leaflet  (no key)
+     • Search:      OpenRouteService geocoder   (free key, no credit card)
+     • Routing:     OpenRouteService foot-walking (free key)
 
-   The map is visual sugar for sighted helpers; the real output is the spoken,
-   steppable turn-by-turn list. Uses the Maps JavaScript SDK (loaded with the
-   user's key) so Places + Directions run client-side without CORS issues.
+   The map is visual sugar for sighted helpers; the spoken, steppable
+   turn-by-turn list is the real output.
    ========================================================================= */
 
-let mapsPromise = null;
+const ORS = "https://api.openrouteservice.org";
+const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+const LEAFLET_JS  = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+
+let leafletPromise = null;
 let map = null;
-let renderer = null;
+let routeLayer = null;
+let markers = [];
 
-// Load the Maps JS SDK once (Places library included). Resolves with
-// `google.maps`. Rejects with a speakable message if the script can't load.
-export function loadMapsApi(key) {
-  if (mapsPromise) return mapsPromise;
+// Load Leaflet (map library + CSS) once. No API key needed for the map.
+export function loadMap() {
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    if (window.L) return resolve(window.L);
 
-  mapsPromise = new Promise((resolve, reject) => {
-    if (window.google && window.google.maps) return resolve(window.google.maps);
-    if (!key) return reject(new Error("Add your Google Maps key in Settings first."));
-
-    const cb = "__secondSightMapsReady";
-    window[cb] = () => resolve(window.google.maps);
-
-    // Fires if the key is invalid / unauthorized.
-    window.gm_authFailure = () =>
-      reject(new Error("Your Google Maps key was rejected. Check it in Settings."));
-
+    if (!document.querySelector('link[data-leaflet]')) {
+      const css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = LEAFLET_CSS;
+      css.setAttribute("data-leaflet", "");
+      document.head.appendChild(css);
+    }
     const s = document.createElement("script");
-    s.src =
-      "https://maps.googleapis.com/maps/api/js?key=" +
-      encodeURIComponent(key) +
-      "&libraries=places&loading=async&callback=" + cb;
+    s.src = LEAFLET_JS;
     s.async = true;
+    s.onload = () => resolve(window.L);
     s.onerror = () => {
-      mapsPromise = null; // allow a retry after fixing the key/network
-      reject(new Error("Couldn't load Google Maps. Check your connection and key."));
+      leafletPromise = null;
+      reject(new Error("Couldn't load the map. Check your connection and try again."));
     };
     document.head.appendChild(s);
   });
-
-  return mapsPromise;
+  return leafletPromise;
 }
 
 // Current location → {lat,lng}. Plain-language errors for permission/timeout.
@@ -63,95 +64,118 @@ export function getCurrentPosition() {
   });
 }
 
-// Create the map once (or recenter it) inside `el`.
-export function getMap(google, el, center) {
+// Create the map once (or recenter). `el` must be visible so tiles size right.
+export function getMap(L, el, center) {
   if (!map) {
-    map = new google.maps.Map(el, {
-      center,
-      zoom: 15,
-      disableDefaultUI: true,
-      zoomControl: true,
-      gestureHandling: "greedy",
-      keyboardShortcuts: false,
-    });
-    renderer = new google.maps.DirectionsRenderer({ map });
+    map = L.map(el, { zoomControl: true, attributionControl: true })
+           .setView([center.lat, center.lng], 15);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap contributors",
+    }).addTo(map);
   } else {
-    map.setCenter(center);
+    map.setView([center.lat, center.lng], 15);
   }
+  // Leaflet miscalculates size if the container was hidden when created.
+  setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 120);
   return map;
 }
 
-function stripHtml(html) {
-  const d = document.createElement("div");
-  d.innerHTML = html || "";
-  return (d.textContent || "").replace(/\s+/g, " ").trim();
+function fmtDist(m) {
+  return m < 1000 ? `${Math.round(m)} metres` : `${(m / 1000).toFixed(1)} kilometres`;
+}
+function fmtDur(s) {
+  const min = Math.max(1, Math.round(s / 60));
+  return `${min} minute${min === 1 ? "" : "s"}`;
+}
+function orsError(status, kind) {
+  if (status === 401 || status === 403)
+    return "Your OpenRouteService key was rejected. Check it in Settings.";
+  if (status === 429)
+    return "The free map service is rate-limited right now. Wait a moment and try again.";
+  return kind === "search" ? "Place search failed. Try again." : "Couldn't get directions. Try again.";
 }
 
-// Resolve a free-text destination ("nearest pharmacy", an address, a place
-// name) to a location, biased to the user's surroundings.
-function findPlace(google, query, center) {
-  return new Promise((resolve, reject) => {
-    const svc = new google.maps.places.PlacesService(map);
-    svc.textSearch({ query, location: center, radius: 8000 }, (results, status) => {
-      const S = google.maps.places.PlacesServiceStatus;
-      if (status === S.OK && results && results.length) {
-        const r = results[0];
-        resolve({
-          name: r.name || query,
-          address: r.formatted_address || "",
-          location: r.geometry.location,
-        });
-      } else if (status === S.ZERO_RESULTS) {
-        reject(new Error("I couldn't find that place. Try saying it differently."));
-      } else if (status === S.REQUEST_DENIED) {
-        reject(new Error("Your Google Maps key isn't authorized for Places. Check it in Settings."));
-      } else {
-        reject(new Error("Place search failed. Try again."));
-      }
-    });
-  });
-}
+// Resolve a spoken destination to a place, biased to the user's surroundings.
+async function geocode(key, query, center) {
+  const url =
+    `${ORS}/geocode/search?api_key=${encodeURIComponent(key)}` +
+    `&text=${encodeURIComponent(query)}&size=1` +
+    `&focus.point.lon=${center.lng}&focus.point.lat=${center.lat}`;
 
-// Plan a WALKING route from origin coords to the spoken destination.
-// Returns a speak-friendly summary + step list, plus the raw directions
-// result for rendering on the map.
-export async function planWalkingRoute(google, originCoords, query) {
-  const center = new google.maps.LatLng(originCoords.lat, originCoords.lng);
-  const place = await findPlace(google, query, center);
+  let res;
+  try { res = await fetch(url); }
+  catch (_) { throw new Error("No network connection. Check your internet and try again."); }
+  if (!res.ok) throw new Error(orsError(res.status, "search"));
 
-  const ds = new google.maps.DirectionsService();
-  let dirs;
-  try {
-    dirs = await ds.route({
-      origin: originCoords,
-      destination: place.location,
-      travelMode: google.maps.TravelMode.WALKING,
-    });
-  } catch (e) {
-    const status = e && e.code ? e.code : "";
-    if (status === "ZERO_RESULTS")
-      throw new Error("I couldn't find a walking route to that place.");
-    if (status === "REQUEST_DENIED")
-      throw new Error("Your Google Maps key isn't authorized for Directions. Check it in Settings.");
-    throw new Error("Couldn't get directions. Try again.");
-  }
-
-  const leg = dirs.routes[0].legs[0];
-  const steps = leg.steps.map((s) => ({
-    text: stripHtml(s.instructions),
-    distance: s.distance ? s.distance.text : "",
-  }));
-
+  const data = await res.json();
+  const f = data.features && data.features[0];
+  if (!f) throw new Error("I couldn't find that place. Try saying it differently.");
   return {
-    destinationName: place.name,
-    address: place.address,
-    distanceText: leg.distance ? leg.distance.text : "",
-    durationText: leg.duration ? leg.duration.text : "",
-    steps,
-    dirs,
+    name: f.properties.name || f.properties.label || query,
+    label: f.properties.label || "",
+    lon: f.geometry.coordinates[0],
+    lat: f.geometry.coordinates[1],
   };
 }
 
-export function renderRoute(dirs) {
-  if (renderer) renderer.setDirections(dirs);
+// Walking route from origin to a destination place.
+async function route(key, origin, dest) {
+  let res;
+  try {
+    res = await fetch(`${ORS}/v2/directions/foot-walking/geojson`, {
+      method: "POST",
+      headers: { Authorization: key, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        coordinates: [[origin.lng, origin.lat], [dest.lon, dest.lat]],
+        instructions: true,
+        units: "m",
+        language: "en",
+      }),
+    });
+  } catch (_) {
+    throw new Error("No network connection. Check your internet and try again.");
+  }
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("I couldn't find a walking route to that place.");
+    throw new Error(orsError(res.status, "route"));
+  }
+
+  const data = await res.json();
+  const feat = data.features && data.features[0];
+  if (!feat) throw new Error("I couldn't find a walking route to that place.");
+  const seg = feat.properties.segments[0];
+  const steps = seg.steps.map((s) => ({
+    text: s.instruction,
+    distance: s.distance ? fmtDist(s.distance) : "",
+  }));
+  const coords = feat.geometry.coordinates.map((c) => [c[1], c[0]]); // [lat,lon]
+  return { steps, coords, distanceText: fmtDist(seg.distance), durationText: fmtDur(seg.duration) };
+}
+
+export async function planWalkingRoute(key, originCoords, query) {
+  if (!key) throw new Error("Add your free OpenRouteService key in Settings first.");
+  const dest = await geocode(key, query, originCoords);
+  const r = await route(key, originCoords, dest);
+  return {
+    destinationName: dest.name,
+    address: dest.label,
+    distanceText: r.distanceText,
+    durationText: r.durationText,
+    steps: r.steps,
+    coords: r.coords,
+    dest,
+  };
+}
+
+// Draw the route line + start/end markers and fit the map to it.
+export function renderRoute(L, mapObj, coords, origin, dest) {
+  if (routeLayer) { routeLayer.remove(); routeLayer = null; }
+  markers.forEach((m) => m.remove());
+  markers = [];
+
+  routeLayer = L.polyline(coords, { color: "#ffb300", weight: 6, opacity: 0.95 }).addTo(mapObj);
+  markers.push(L.marker([origin.lat, origin.lng]).addTo(mapObj).bindPopup("You are here"));
+  markers.push(L.marker([dest.lat, dest.lon]).addTo(mapObj).bindPopup(dest.name));
+  try { mapObj.fitBounds(routeLayer.getBounds(), { padding: [30, 30] }); } catch (_) {}
 }
