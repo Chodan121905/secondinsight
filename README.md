@@ -32,13 +32,15 @@ it self-voices), the app **runs itself**:
   Warnings read with a "confirm with your pharmacist" disclaimer), **translates**
   a non-English sign, or **describes the scene**. It skips repeats so it isn't
   chatty.
-- **Warns about hazards in real time, on-device** — a continuous coco-ssd loop
-  calls out anything close ("Car on your left, very close") instantly, with no
-  network, even before the AI narration speaks.
+- **Volunteers what's around you, on its own** — a continuous coco-ssd loop
+  (on-device, no network) speaks a short roundup of nearby people, vehicles, and
+  objects with rough position ("Around you: a person ahead, and a car on your
+  left"), and **interrupts** to warn about anything very close. The user never
+  has to ask — because someone who can't see can't know to ask.
 - **Takes spoken commands** (where the browser supports speech input) — say
-  *"read this"*, *"medicine"*, *"translate"*, *"what's around me"*, *"navigate
-  to the nearest pharmacy"*, *"stop"* / *"start"*, or just ask a question. Say
-  *"help"* to hear the list. No button required for any of it.
+  *"read this"*, *"medicine"*, *"translate"*, *"navigate to the nearest
+  pharmacy"*, *"stop"* / *"start"*, or just ask a question. Say *"help"* to hear
+  the list. No button required for any of it.
 
 The on-screen buttons still work, but they're now **optional** — for a sighted
 helper, a low-vision user who prefers tapping, or a browser without voice input.
@@ -119,11 +121,14 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
 1. **Tap anywhere once** to start. That's the only required tap. From then on
    the app is hands-free: it warns about anything close, describes what's in
    front of you on its own, and listens for spoken commands.
-2. **Just listen** — point the phone where you're facing and the app keeps
-   telling you what's around. **Tap the camera** any time to force an immediate
-   "Look", or **speak**: *"read this"*, *"medicine"*, *"translate"*, *"what's
-   around me"*, *"navigate to the nearest pharmacy"*, *"stop"* / *"start"*, or
-   ask any question. Say *"help"* for the list.
+2. **Just listen** — point the phone where you're facing and the app **tells you
+   what's around you on its own**, in a short spoken roundup ("Around you: a
+   person ahead, a chair on your left"), and interrupts to warn you about
+   anything close. You never have to ask. If you *want* more, **tap the camera**
+   to force an immediate "Look", or **speak**: *"read this"*, *"medicine"*,
+   *"translate"*, *"navigate to the nearest pharmacy"*, *"stop"* / *"start"*, or
+   ask any question. Say *"help"* for the list. (You can still say *"what's
+   around me"* for an instant recap, but you don't need to.)
 3. **Enhance** (the 🔆 button) works immediately with **no key, no server** —
    zoom + contrast / brighter / black-and-white / invert + torch. The
    offline-safe fallback.
@@ -142,15 +147,17 @@ Translate / Ask / Navigate) and family tracking all need the deployed backend.
    Leaflet (no key) for the map, and **OpenRouteService** (server-side, key in
    env) for search + walking directions.
 
-6. **👣 Walking awareness (always on):** the detector runs automatically as part
-   of hands-free mode and, because the user can't see the boxes, **speaks what
-   it sees** — it calls out nearby people, vehicles, and objects with rough
-   position and proximity at a calm pace ("Person ahead", "Car on your left,
-   close"), without repeating the same thing every second, and **interrupts with
-   an urgent tone + haptic** when something is very close. Ask *"what's around
-   me"* any time for an on-demand roundup. **Pause** (button or say *"stop"*)
-   quiets everything; **Resume** (or *"start"*) brings it back. Live detection
-   boxes also render for sighted helpers.
+6. **👣 Walking awareness (always on, proactive):** the detector runs
+   automatically as part of hands-free mode and, because the user can't see the
+   boxes — and can't know to *ask* about what they can't see — it **volunteers
+   what's around on its own**: a short spoken roundup of nearby people, vehicles,
+   and objects with rough position ("Around you: a person ahead, and a car on
+   your left") at a calm pace, skipping a repeat when the scene hasn't changed,
+   and **interrupting with an urgent tone + haptic** when something is very
+   close. (Saying *"what's around me"* gives an instant recap, but it's never
+   required.) **Pause** (button or *"stop"*) quiets everything; **Resume** (or
+   *"start"*) brings it back. Live detection boxes also render for sighted
+   helpers.
 
    Runs on-device with **coco-ssd (MobileNet-SSD)** via TensorFlow.js — a
    **YOLO-style** object detector that needs **no API key, no cost**, and keeps

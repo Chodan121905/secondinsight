@@ -418,9 +418,9 @@ let detector = null;
 let detectTimer = null;
 let narrateTimer = null;
 let lastUrgentAt = 0;
-let lastCalmAt = 0;            // last unhurried object callout
-const seenAt = new Map();      // object key -> last time we spoke it (anti-repeat)
-let lastDets = [];             // most recent detections (for "what's around me")
+let lastRoundupAt = 0;         // last proactive "around you" summary
+let lastRoundupSig = "";       // what that summary contained (skip repeats)
+let lastDets = [];             // most recent detections
 let lastNarration = "";
 
 const isSpeaking = () => !!(window.speechSynthesis && window.speechSynthesis.speaking);
@@ -431,12 +431,12 @@ function startAuto() {
   narrationPaused = false;
   overlayCanvas.hidden = false;
   lastNarration = "";
-  seenAt.clear();
-  lastCalmAt = 0;
+  lastRoundupAt = 0;
+  lastRoundupSig = "";
   setStatus("Watching. I'll tell you what's around you — no buttons needed.", "active");
 
-  let intro = "I'm watching now. I'll tell you what's around you, and you don't " +
-              "need to press anything.";
+  let intro = "I'm watching now. I'll keep telling you what's around you on my " +
+              "own — you don't have to ask or press anything.";
   if (!backendUp())
     intro += " The AI server isn't connected, so right now I can only warn you " +
              "about nearby objects.";
@@ -494,8 +494,11 @@ async function detectLoop() {
     const dets = await detectFrame(detector, video);
     lastDets = dets;
     drawBoxes(overlayCanvas, video, dets, 0.5);
-    if (!narrationPaused && !anyModalOpen())
-      handleHazards(describeDetections(dets, video.videoWidth, video.videoHeight, 0.5));
+    if (!narrationPaused && !anyModalOpen()) {
+      const items = describeDetections(dets, video.videoWidth, video.videoHeight, 0.5);
+      handleHazards(items);              // imminent danger → interrupt now
+      maybeAnnounceSurroundings(items);  // otherwise, volunteer what's around
+    }
   } catch (_) { /* skip a bad frame */ }
   if (autoOn) detectTimer = setTimeout(detectLoop, 650);
 }
@@ -504,44 +507,55 @@ function handleHazards(items) {
   if (!items.length) return;
   const now = Date.now();
   const top = items[0];
-
   // Imminent hazard: interrupt everything with haptic + alert tone.
   if (top.urgent && now - lastUrgentAt > 2200) {
     lastUrgentAt = now;
-    seenAt.set(top.key, now);
     setStatus(phraseFor(top), "active");
     vibrate([80, 40, 80]);
     earcon("error");
     speak(phraseFor(top), { interrupt: true });
-    return;
   }
+}
 
-  // The user can't see the boxes, so we SAY what's there too — calmly: only
-  // when nothing else is talking, at an unhurried pace, and without repeating
-  // the same object every second.
-  if (isSpeaking()) return;
-  if (now - lastCalmAt < 2600) return;     // unhurried cadence
-  if (now - lastUrgentAt < 1500) return;   // let a warning breathe
-  for (const it of items.slice(0, 4)) {
-    if (now - (seenAt.get(it.key) || 0) > 7000) {  // don't repeat within 7s
-      seenAt.set(it.key, now);
-      lastCalmAt = now;
-      setStatus(phraseFor(it), "active");
-      earcon("capture");
-      speak(phraseFor(it), { interrupt: false });
-      return;
-    }
-  }
+// A blind user can't see the boxes and shouldn't have to ASK what's around
+// them — so we tell them, on our own: a short spoken roundup of what's nearby,
+// at a calm pace, skipping a repeat when the scene hasn't changed.
+function maybeAnnounceSurroundings(items) {
+  if (!items.length || isSpeaking()) return;
+  const now = Date.now();
+  if (now - lastUrgentAt < 1500) return;       // let a warning breathe
+  if (now - lastRoundupAt < 6500) return;      // unhurried cadence
+  const sig = items.slice(0, 3).map((i) => i.key).join("|");
+  if (sig === lastRoundupSig && now - lastRoundupAt < 16000) return; // static scene
+  lastRoundupAt = now;
+  lastRoundupSig = sig;
+  const phrase = surroundingsPhrase(items);
+  setStatus(phrase, "active");
+  speak(phrase, { interrupt: false });
+}
+
+// "Around you: a person ahead, a chair on your left, and a door on your right."
+function surroundingsPhrase(items) {
+  const top = items.slice(0, 3).map((it) => {
+    const where = it.pos === "ahead" ? "ahead" : "on your " + it.pos;
+    const prox = it.prox === "very close" ? "very close " : "";
+    return prox + "a " + it.cls + " " + where;
+  });
+  if (top.length === 1) return "Around you, there's " + top[0] + ".";
+  return "Around you: " + top.slice(0, -1).join(", ") + ", and " + top[top.length - 1] + ".";
 }
 
 // --- AI narration loop (periodic, server) ---
 function narrateLoop(soon) {
   if (narrateTimer) { clearTimeout(narrateTimer); narrateTimer = null; }
   if (!autoOn) return;
+  // The on-device object roundup is the primary, fast "what's around you"
+  // channel; the AI narration is a slower layer that adds richer scene context
+  // (what people are doing, text, setting), so it runs less often.
   narrateTimer = setTimeout(async () => {
     if (autoOn && !narrationPaused) await narrateOnce();
     if (autoOn) narrateLoop(false);
-  }, soon ? 1400 : 9000);
+  }, soon ? 2000 : 16000);
 }
 
 async function narrateOnce(force = false) {
@@ -594,7 +608,11 @@ async function speakTask(task, question) {
 function announceSurroundings() {
   const items = describeDetections(lastDets, video.videoWidth, video.videoHeight, 0.5);
   if (!items.length) { speak("I don't see anything notable around you right now."); return; }
-  speak("Around you: " + items.slice(0, 3).map(phraseFor).join(", ") + ".");
+  lastRoundupAt = Date.now();
+  lastRoundupSig = items.slice(0, 3).map((i) => i.key).join("|");
+  const phrase = surroundingsPhrase(items);
+  setStatus(phrase, "active");
+  speak(phrase);
 }
 
 // --- Hands-free voice commands (continuous, where supported) ---
@@ -677,11 +695,12 @@ function handleCommand(raw) {
 
 function sayHelp() {
   speak(
-    "You don't have to press anything. I describe what I see on my own. " +
-    "You can also say: describe, to hear what's in front of you. Read, to read text. " +
-    "Medicine, for a medicine label. Translate, for a sign in another language. " +
-    "Around me, for nearby people and objects. Navigate to a place, for walking " +
-    "directions. Or just ask a question. Say stop to quiet me, and start to resume."
+    "You don't have to press anything, and you don't have to ask what's around " +
+    "you — I tell you that on my own and warn you about anything close. " +
+    "If you want more, you can say: describe, to hear what's in front of you. " +
+    "Read, to read text. Medicine, for a medicine label. Translate, for a sign " +
+    "in another language. Navigate to a place, for walking directions. Or just " +
+    "ask a question. Say stop to quiet me, and start to resume."
   );
 }
 
