@@ -32,15 +32,9 @@ module.exports = async (req, res) => {
     }, checks),
     validate("maps", present.maps, async () => {
       const key = (process.env.ORS_API_KEY || "").trim();
-      // Test geocoding (query-param auth) and routing (header auth) separately
-      // — they authenticate differently, so this shows if only one is failing.
-      const g = await fetch(
-        `https://api.openrouteservice.org/geocode/search?api_key=${encodeURIComponent(key)}&text=test&size=1`);
-      let geocode = g.ok ? "ok" : `HTTP ${g.status}`;
-      let body = "";
-      if (!g.ok) { try { body = (await g.text()).replace(/\s+/g, " ").slice(0, 180); } catch (_) {} }
-
-      let routing;
+      // Routing uses the ORS key (this is the real key test); place-search is
+      // keyless via Nominatim now, so test that for availability only.
+      let routing = "unreachable", body = "";
       try {
         const d = await fetch("https://api.openrouteservice.org/v2/directions/foot-walking/geojson", {
           method: "POST",
@@ -48,10 +42,19 @@ module.exports = async (req, res) => {
           body: JSON.stringify({ coordinates: [[8.681, 49.411], [8.687, 49.420]] }),
         });
         routing = d.ok ? "ok" : `HTTP ${d.status}`;
-      } catch (_) { routing = "unreachable"; }
+        if (!d.ok) { try { body = (await d.text()).replace(/\s+/g, " ").slice(0, 180); } catch (_) {} }
+      } catch (_) {}
 
-      if (geocode === "ok" && routing === "ok") return "ok";
-      return `geocode ${geocode}, routing ${routing}${body ? ` — ${body}` : ""}`;
+      let geocode = "unreachable";
+      try {
+        const g = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=orchard", {
+          headers: { "User-Agent": "SecondSight/1.0 (assistive navigation)", "Accept-Language": "en" },
+        });
+        geocode = g.ok ? "ok" : `HTTP ${g.status}`;
+      } catch (_) {}
+
+      if (routing === "ok" && geocode === "ok") return "ok";
+      return `routing ${routing}, geocode(nominatim) ${geocode}${body ? ` — ${body}` : ""}`;
     }, checks),
     validate("exa", present.exa, async () => {
       const r = await fetch("https://api.exa.ai/search", {
