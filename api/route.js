@@ -9,7 +9,9 @@ module.exports = async (req, res) => {
   if (cors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "POST only." });
 
-  const key = process.env.ORS_API_KEY;
+  // Trim: pasting a key into a dashboard often leaves a trailing newline/space,
+  // which makes ORS reject an otherwise-valid key.
+  const key = (process.env.ORS_API_KEY || "").trim();
   if (!key) return res.status(500).json({ error: "The server has no maps key configured." });
 
   const { origin, query } = readBody(req);
@@ -24,7 +26,7 @@ module.exports = async (req, res) => {
       `&text=${encodeURIComponent(query)}&size=1` +
       `&focus.point.lon=${origin.lng}&focus.point.lat=${origin.lat}`;
     const gRes = await fetch(gUrl);
-    if (!gRes.ok) return res.status(502).json({ error: orsErr(gRes.status, "search") });
+    if (!gRes.ok) return res.status(502).json({ error: await orsMessage(gRes, "search") });
     const gData = await gRes.json();
     const f = gData.features && gData.features[0];
     if (!f) return res.status(404).json({ error: "I couldn't find that place. Try saying it differently." });
@@ -46,7 +48,7 @@ module.exports = async (req, res) => {
     });
     if (!dRes.ok) {
       if (dRes.status === 404) return res.status(404).json({ error: "I couldn't find a walking route to that place." });
-      return res.status(502).json({ error: orsErr(dRes.status, "route") });
+      return res.status(502).json({ error: await orsMessage(dRes, "route") });
     }
     const dData = await dRes.json();
     const feat = dData.features && dData.features[0];
@@ -69,10 +71,25 @@ module.exports = async (req, res) => {
 
 function fmtDist(m) { return m < 1000 ? `${Math.round(m)} metres` : `${(m / 1000).toFixed(1)} kilometres`; }
 function fmtDur(s) { const min = Math.max(1, Math.round(s / 60)); return `${min} minute${min === 1 ? "" : "s"}`; }
-function orsErr(status, kind) {
-  if (status === 401 || status === 403) return "The server's maps key was rejected.";
-  if (status === 429) return "The maps service is rate-limited. Wait a moment and try again.";
-  return kind === "search" ? "Place search failed. Try again." : "Couldn't get directions. Try again.";
+// Build a spoken-friendly message from the real ORS response, so a rejected
+// key is distinguishable from a quota limit (both arrive as 401/403).
+async function orsMessage(res, kind) {
+  let detail = "";
+  try {
+    const data = await res.clone().json();
+    detail = (data && (data.error?.message || data.error)) || "";
+    if (typeof detail !== "string") detail = JSON.stringify(detail);
+  } catch (_) {
+    try { detail = await res.text(); } catch (_) {}
+  }
+  if (res.status === 401 || res.status === 403) {
+    if (/quota|rate.?limit|daily|exceeded/i.test(detail))
+      return "The maps service has hit its usage limit for now. Try again later.";
+    return "The server's maps key was rejected. Check the ORS_API_KEY value in the server settings.";
+  }
+  if (res.status === 429) return "The maps service is rate-limited. Wait a moment and try again.";
+  const base = kind === "search" ? "Place search failed." : "Couldn't get directions.";
+  return detail ? `${base} (${detail.slice(0, 120)})` : `${base} Try again.`;
 }
 function readBody(req) {
   if (req.body && typeof req.body === "object") return req.body;
