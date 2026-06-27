@@ -659,6 +659,28 @@ function listenChunk() {
 }
 
 const said = (t, ...words) => words.some((w) => t.includes(w));
+
+// Does this sound like "get me somewhere"? Deliberately broad.
+const NAV_INTENT = /\b(navigate|direction|directions|route|take me|bring me|walk|head|get to|drive|where is|where's|how do i get|how to get|find)\b|\bgo\b/;
+
+// Pull the place name out of natural phrasing: "I want to go to Orchard",
+// "take me to Orchard Road", "go orchard", "where is the nearest pharmacy".
+function extractDestination(t) {
+  let dest;
+  const i = t.lastIndexOf(" to ");
+  if (i >= 0) {
+    dest = t.slice(i + 4);                       // text after the last " to "
+  } else {
+    const m = t.match(/\b(?:navigate|directions?|route|walk|head|drive|go|where is|where's|find)\b\s+(.+)/);
+    dest = m ? m[1] : "";
+  }
+  dest = (dest || "").replace(/\b(please|now|thanks|thank you)\b/g, "").trim();
+  // Strip leading filler words ("go the", "to my", …) left over from the phrase.
+  while (/^(?:to|the|a|an|go|of|my|some)\s+/.test(dest))
+    dest = dest.replace(/^(?:to|the|a|an|go|of|my|some)\s+/, "");
+  return dest.trim();
+}
+
 function handleCommand(raw) {
   const t = (raw || "").toLowerCase().trim();
   if (!t) return;
@@ -674,14 +696,21 @@ function handleCommand(raw) {
     }
   }
 
-  // "navigate to / take me to / go to / directions to / where is X"
-  const nav = t.match(/(?:navigate to|take me to|go to|directions to|walk to|where is|find me)\s+(.+)/);
-  if (nav && nav[1]) return navigateTo(nav[1].trim());
-
+  // Control words first, so "go on" / "continue" resume narration instead of
+  // being mistaken for a "go" destination.
   if (said(t, "help", "what can i say", "what can you do", "commands")) return sayHelp();
   if (said(t, "stop", "quiet", "silence", "shut up", "pause", "hush"))  return setPaused(true);
   if (said(t, "start", "resume", "continue", "carry on", "go on", "wake up"))
     return narrationPaused ? setPaused(false) : narrateLoop(true);
+
+  // Navigation, parsed forgivingly: "take me to Orchard", "I want to go to
+  // Orchard", "go orchard", "where is the nearest pharmacy" all route.
+  if (NAV_INTENT.test(t)) {
+    const dest = extractDestination(t);
+    if (dest) return navigateTo(dest);
+    return speak("Where would you like to go? Say, for example, take me to Orchard Road.");
+  }
+
   if (said(t, "around", "near me", "nearby", "surroundings"))           return announceSurroundings();
   if (said(t, "medicine", "medication", "pill", "tablet", "prescription")) return speakTask("medicine");
   if (said(t, "translate", "translation"))                             return speakTask("translate");
