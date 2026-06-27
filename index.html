@@ -61,6 +61,12 @@
       </span>
     </button>
 
+    <!-- The camera is the biggest thing on screen, so it IS the primary
+         action: tapping it runs Describe (the most common need). Hidden until
+         the camera starts; sits below the status caption. -->
+    <button id="tapCapture" class="tap-capture" type="button" hidden
+      aria-label="Camera. Double tap to describe what you see."></button>
+
     <!-- Large caption + screen-reader live region for state changes. -->
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </main>
@@ -213,6 +219,16 @@
       </p>
 
       <label class="field">
+        <span class="field__label" id="rateLabel">Speech speed</span>
+        <select id="speechRate" class="field__input" aria-labelledby="rateLabel">
+          <option value="0.85">Slow</option>
+          <option value="1" selected>Normal</option>
+          <option value="1.4">Fast</option>
+          <option value="1.8">Faster</option>
+        </select>
+      </label>
+
+      <label class="field">
         <span class="field__label" id="openaiKeyLabel">OpenAI API key (required)</span>
         <input id="openaiKey" class="field__input" type="password"
           aria-labelledby="openaiKeyLabel"
@@ -262,6 +278,9 @@
       <button class="toggle" type="button" data-filter="bright" aria-pressed="false">Brighter</button>
       <button class="toggle" type="button" data-filter="grayscale" aria-pressed="false">Black &amp; white</button>
       <button class="toggle" type="button" data-filter="invert" aria-pressed="false">Invert</button>
+      <button id="torchBtn" class="toggle toggle--wide" type="button" aria-pressed="false" hidden>
+        🔦 Flashlight
+      </button>
     </div>
 
     <button id="enhanceReset" class="btn btn--block" type="button">Reset enhancements</button>

@@ -128,6 +128,15 @@ body {
 .start-gate__hint { margin: 0; color: var(--ink-dim); font-size: 1.1rem; max-width: 24rem; }
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.8 } }
 
+/* ---- Tap-the-camera-to-describe target -------------------------------- */
+.tap-capture {
+  position: absolute; inset: 0 0.75rem 0.5rem; z-index: 1;
+  background: transparent; border: 0; padding: 0; margin: 0;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.tap-capture[hidden] { display: none; }
+.tap-capture:focus-visible { outline: 4px solid var(--cyan); outline-offset: -6px; border-radius: var(--radius); }
+
 /* ---- Status caption --------------------------------------------------- */
 .status {
   position: absolute; z-index: 2; left: 0.75rem; right: 0.75rem; bottom: 0.6rem;
@@ -282,6 +291,20 @@ textarea.field__input { min-height: 3.5rem; resize: vertical; }
   touch-action: manipulation; transition: background 0.15s ease, border-color 0.15s ease;
 }
 .toggle[aria-pressed="true"] { background: var(--amber); color: var(--amber-ink); border-color: var(--amber); }
+.toggle--wide { grid-column: 1 / -1; }
+.toggle[hidden] { display: none; }
+
+/* Native select styled like our text inputs, with a visible caret. */
+select.field__input {
+  appearance: none; -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--amber) 50%),
+    linear-gradient(135deg, var(--amber) 50%, transparent 50%);
+  background-position: right 1.2rem center, right 0.85rem center;
+  background-size: 0.5rem 0.5rem, 0.5rem 0.5rem;
+  background-repeat: no-repeat;
+  padding-right: 2.5rem;
+}
 
 /* ---- Reduced motion --------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {

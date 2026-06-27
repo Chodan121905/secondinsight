@@ -57,6 +57,54 @@ export function captureFrame(video, maxDim = 1280, quality = 0.72) {
   return canvas.toDataURL("image/jpeg", quality);
 }
 
+// ---- Flashlight / torch --------------------------------------------------
+// Reading a label or text in dim light is a real blind-user problem. Where the
+// hardware supports it, we can turn on the camera torch. Gracefully reports
+// unsupported instead of failing.
+
+let torchOn = false;
+
+function videoTrack() {
+  return stream ? stream.getVideoTracks()[0] : null;
+}
+
+export function supportsTorch() {
+  try {
+    const tr = videoTrack();
+    const caps = tr && tr.getCapabilities ? tr.getCapabilities() : null;
+    return !!(caps && caps.torch);
+  } catch (_) { return false; }
+}
+
+export async function setTorch(on) {
+  const tr = videoTrack();
+  if (!tr) return false;
+  try {
+    await tr.applyConstraints({ advanced: [{ torch: on }] });
+    torchOn = on;
+    return true;
+  } catch (_) { return false; }
+}
+
+export function isTorchOn() { return torchOn; }
+
+// Average luminance (0–255) of the current frame, sampled tiny for speed.
+// Used to warn "it's dark" before a text/medicine read.
+export function frameBrightness(video) {
+  try {
+    const c = document.createElement("canvas");
+    c.width = 32; c.height = 32;
+    const x = c.getContext("2d");
+    x.drawImage(video, 0, 0, 32, 32);
+    const d = x.getImageData(0, 0, 32, 32).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    }
+    return sum / (d.length / 4);
+  } catch (_) { return 255; }
+}
+
 // ---- Enhance (visual-only) ----------------------------------------------
 
 const FILTER_CLASS = {

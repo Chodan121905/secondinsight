@@ -9,10 +9,11 @@
    ========================================================================= */
 
 import { startCamera, captureFrame, bindVisibility, isSecure,
-         setFilter, setZoom, resetEnhance } from "./camera.js";
+         setFilter, setZoom, resetEnhance,
+         supportsTorch, setTorch, isTorchOn, frameBrightness } from "./camera.js";
 import { analyzeImage, exaEnrich, TASKS, taskTitle } from "./vision.js";
-import { speak, stopSpeaking, vibrate, voiceInputSupported,
-         createRecognizer } from "./speech.js";
+import { speak, stopSpeaking, vibrate, voiceInputSupported, createRecognizer,
+         earcon, ensureAudio, setSpeechRate } from "./speech.js";
 import { loadMapsApi, getCurrentPosition, getMap,
          planWalkingRoute, renderRoute } from "./maps.js";
 
@@ -21,10 +22,11 @@ const keys = { openai: "", exa: "", google: "" };
 
 // ---- Element handles -----------------------------------------------------
 const $ = (id) => document.getElementById(id);
-const video    = $("camera");
-const startBtn = $("startBtn");
-const statusEl = $("status");
-const actions  = $("actions");
+const video      = $("camera");
+const startBtn   = $("startBtn");
+const tapCapture = $("tapCapture");
+const statusEl   = $("status");
+const actions    = $("actions");
 
 const resultOverlay = $("resultOverlay");
 const resultTitle   = $("resultTitle");
@@ -66,14 +68,20 @@ const settingsOverlay = $("settingsOverlay");
 const openaiKey   = $("openaiKey");
 const exaKey      = $("exaKey");
 const googleKey   = $("googleKey");
+const speechRate  = $("speechRate");
 const settingsSave   = $("settingsSave");
 const settingsCancel = $("settingsCancel");
 
 const enhancePanel = $("enhancePanel");
 const zoom         = $("zoom");
 const zoomValue    = $("zoomValue");
+const torchBtn     = $("torchBtn");
 const enhanceReset = $("enhanceReset");
 const enhanceClose = $("enhanceClose");
+
+// Overlays/panels that should suppress the tap-to-describe camera target.
+const MODALS = () => [resultOverlay, askOverlay, navOverlay, routeOverlay, settingsOverlay, enhancePanel];
+const anyModalOpen = () => MODALS().some((o) => !o.hidden);
 
 let welcomed = false;
 let lastResultText = "";
@@ -115,6 +123,7 @@ function makeVoiceControl({ btn, label, heard, input }) {
     on = v;
     btn.classList.toggle("is-listening", v);
     label.textContent = v ? "Listening… tap to stop" : "Tap to speak";
+    earcon(v ? "listen" : "stoplisten");
     if (v) vibrate(40);
   }
   return {
@@ -148,9 +157,11 @@ async function start() {
   try {
     await startCamera(video);
     startBtn.hidden = true;
+    tapCapture.hidden = false;
     actions.hidden = false;
-    setStatus("Camera ready. Choose an action, or point and tap Describe.", "ok");
-    setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 4000);
+    earcon("success");
+    setStatus("Camera ready. Tap the camera to describe what you see, or choose an action below.", "ok");
+    setTimeout(() => { if (statusEl.textContent.startsWith("Camera ready")) setStatus(""); }, 5000);
     actions.querySelector(".action--primary")?.focus();
   } catch (err) {
     startBtn.disabled = false;
@@ -188,15 +199,26 @@ async function runTask(task, question) {
   thinking.hidden = false;
   replayBtn.disabled = true;
   openOverlay(resultOverlay, resultClose);
-  vibrate(30);
-  speak(cfg.title + "…"); // confirm the chosen action aloud immediately
 
+  // Capture first (instant) so we can give immediate "captured" feedback and
+  // check the lighting before the slower network round-trip.
   let imageDataUrl;
   try {
     imageDataUrl = captureFrame(video, cfg.maxDim);
   } catch (_) {
     return showResultError("Couldn't capture a frame from the camera. Try again.");
   }
+  vibrate(30);
+  earcon("capture");
+
+  // Reading text in the dark is a top blind-user failure mode — warn early so
+  // they can turn on the flashlight (Enhance) and retake.
+  const textTask = task === "read" || task === "medicine" || task === "translate";
+  let intro = cfg.title + "…";
+  if (textTask && !isTorchOn() && frameBrightness(video) < 55) {
+    intro += " It looks dark. Turning on the flashlight in Enhance may help.";
+  }
+  speak(intro); // confirm the chosen action aloud immediately
 
   currentAbort = new AbortController();
   try {
@@ -217,6 +239,7 @@ function showResult(text) {
   lastResultText = text;
   resultText.textContent = text;
   replayBtn.disabled = false;
+  earcon("success");
   speak(text);
 }
 function showResultError(message) {
@@ -226,6 +249,7 @@ function showResultError(message) {
   lastResultText = message;
   replayBtn.disabled = false;
   vibrate([120, 60, 120]);
+  earcon("error");
   speak(message);
 }
 async function enrich(labelText) {
@@ -343,6 +367,7 @@ function nextStep() {
     routeStep.textContent = msg;
     routeNext.disabled = true;
     vibrate([40, 40, 40]);
+    earcon("arrive");
     speak(msg);
   }
 }
@@ -357,22 +382,45 @@ function showRouteError(message) {
 }
 
 // ---- Settings ------------------------------------------------------------
+let speechRatePref = "1";
 function openSettings() {
   openaiKey.value = keys.openai;
   exaKey.value = keys.exa;
   googleKey.value = keys.google;
+  speechRate.value = speechRatePref;
   openOverlay(settingsOverlay, openaiKey);
 }
 function saveSettings() {
   keys.openai = openaiKey.value.trim();
   keys.exa = exaKey.value.trim();
   keys.google = googleKey.value.trim();
+  speechRatePref = speechRate.value;
+  setSpeechRate(speechRatePref);
   closeOverlay(settingsOverlay);
   setStatus(keys.openai ? "Settings saved." : "Saved, but no OpenAI key set yet.", "ok");
 }
 
 // ---- Enhance (no network) ------------------------------------------------
-function openEnhance() { openOverlay(enhancePanel, enhanceClose); }
+function openEnhance() {
+  // Only offer the flashlight where the camera hardware actually supports it.
+  if (supportsTorch()) {
+    torchBtn.hidden = false;
+    torchBtn.setAttribute("aria-pressed", String(isTorchOn()));
+  } else {
+    torchBtn.hidden = true;
+  }
+  openOverlay(enhancePanel, enhanceClose);
+}
+async function toggleTorch() {
+  const want = !isTorchOn();
+  const ok = await setTorch(want);
+  if (ok) {
+    torchBtn.setAttribute("aria-pressed", String(want));
+    speak(want ? "Flashlight on." : "Flashlight off.");
+  } else {
+    speak("Sorry, the flashlight isn't available on this camera.");
+  }
+}
 function onZoom() {
   const z = parseFloat(zoom.value);
   setZoom(video, z);
@@ -396,7 +444,7 @@ function resetEnhancements() {
 const WELCOME =
   "Welcome to Second Sight, a spare pair of eyes. " +
   "Tap anywhere on the screen to start your camera.";
-function welcome() { if (!welcomed) { welcomed = true; speak(WELCOME); } }
+function welcome() { if (!welcomed) { welcomed = true; ensureAudio(); speak(WELCOME); } }
 function onReady() {
   try { startBtn.focus({ preventScroll: true }); } catch (_) { startBtn.focus(); }
   if (!voiceInputSupported) { askVoice.markUnsupported(); navVoice.markUnsupported(); }
@@ -439,16 +487,22 @@ routePrev.addEventListener("click", () => showStep(stepIdx - 1));
 routeRepeat.addEventListener("click", () => routeSteps.length && showStep(stepIdx));
 routeClose.addEventListener("click", () => { stopSpeaking(); closeOverlay(routeOverlay); });
 
+// Tap the camera itself to Describe (biggest, easiest non-visual target).
+tapCapture.addEventListener("click", () => { if (!anyModalOpen()) runTask("describe"); });
+
 // Settings dialog
 settingsSave.addEventListener("click", saveSettings);
-settingsCancel.addEventListener("click", () => closeOverlay(settingsOverlay));
+settingsCancel.addEventListener("click", () => { setSpeechRate(speechRatePref); closeOverlay(settingsOverlay); });
+// Live preview: hear the new speed the instant it changes.
+speechRate.addEventListener("change", () => { setSpeechRate(speechRate.value); speak("This is the speech speed."); });
 
 // Enhance panel
 zoom.addEventListener("input", onZoom);
+torchBtn.addEventListener("click", toggleTorch);
 enhanceReset.addEventListener("click", resetEnhancements);
 enhanceClose.addEventListener("click", () => closeOverlay(enhancePanel));
 enhancePanel.addEventListener("click", (e) => {
-  const t = e.target.closest(".toggle");
+  const t = e.target.closest(".toggle[data-filter]"); // torchBtn handled separately
   if (t) onFilterToggle(t);
 });
 

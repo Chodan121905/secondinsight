@@ -80,3 +80,15 @@ access (except on `localhost`).
 - **Large-print visual:** Atkinson Hyperlegible, high-contrast dark theme,
   ≥72px tap targets, amber=action / cyan=listening, visible focus rings,
   reduced-motion respected.
+
+### Built from a blind user's perspective
+
+- **Tap the camera to Describe** — the camera is the biggest thing on screen,
+  so it *is* the primary action; no hunting for a button.
+- **Flashlight + low-light warning** — reading a label in dim light is a top
+  failure mode, so the app warns "it looks dark" before a text read and offers
+  a camera **torch** toggle (where the hardware supports it).
+- **Adjustable speech speed** (Slow → Faster) — experienced screen-reader
+  users listen fast; the default rate is theirs to change, with a live preview.
+- **Earcons** — short distinct sounds confirm *capture / listening / done /
+  error / arrived* instantly, before the slower spoken result, plus haptics.
